@@ -25,7 +25,9 @@ sidecar:
     name: ""
   workerSubject: ""
   worker:
-    requestTimeoutMs: 10000
+    # Maximum time the sidecar waits for a worker turn to complete.
+    # Pi/Coding-agent turns often need more than a few seconds, especially from Slack.
+    requestTimeoutMs: 600000
     connectRetryMs: 250
     maxConnectRetryMs: 5000
   configMountPath: /config
@@ -71,6 +73,11 @@ dbtProfiles:
   secretName: ""
   secretKey: profiles.yml
   mountPath: /workspace/dbt-profiles
+
+dbtBootstrap:
+  enabled: false
+  workDir: ""
+  command: make bootstrap
 
 auth:
   secretName: ""

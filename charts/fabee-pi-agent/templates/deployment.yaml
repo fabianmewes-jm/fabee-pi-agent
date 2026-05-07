@@ -233,6 +233,42 @@ spec:
               readOnly: true
             {{- end }}
         {{- end }}
+        {{- if .Values.dbtBootstrap.enabled }}
+        - name: dbt-bootstrap
+          image: {{ printf "%s:%s" .Values.image.repository .Values.image.tag }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              work_dir="{{ default (include "fabee-pi-agent.workDir" .) .Values.dbtBootstrap.workDir }}"
+              cd "$work_dir"
+              {{ .Values.dbtBootstrap.command }}
+          env:
+            - name: HOME
+              value: {{ .Values.container.homeDir | quote }}
+          securityContext:
+            runAsUser: {{ .Values.container.runAsUser }}
+            runAsGroup: {{ .Values.container.runAsGroup }}
+            runAsNonRoot: {{ .Values.container.runAsNonRoot }}
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            {{- if .Values.runtimeHome.enabled }}
+            - name: runtime-home
+              mountPath: {{ .Values.runtimeHome.mountPath }}
+            {{- end }}
+            - name: workspace
+              mountPath: {{ .Values.workspace.mountPath }}
+            {{- if and .Values.dbtProfiles.enabled .Values.dbtProfiles.secretName }}
+            - name: dbt-profiles
+              mountPath: {{ .Values.dbtProfiles.mountPath }}
+              readOnly: true
+            {{- end }}
+        {{- end }}
       containers:
         - name: {{ include "fabee-pi-agent.containerName" . }}
           image: {{ printf "%s:%s" .Values.image.repository .Values.image.tag }}

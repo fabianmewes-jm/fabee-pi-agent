@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.14
+
+- upgrade pi runtime packages to `0.73.0` and adapt worker integration to the updated APIs
+- preserve session restore, auth/model lookup, and compaction event handling with the newer pi runtime
+- add dbt prod-target guidance and bootstrap support for analytics deployments
+
 ## 0.1.12
 
 - emit only the final assistant answer to the gateway and suppress internal thinking output

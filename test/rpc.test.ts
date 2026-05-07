@@ -126,6 +126,11 @@ describe("createWorkerBeePeer", () => {
 				replyTo: "msg-1",
 				sessionId: "session-123",
 				turnId: "turn-123",
+				payload: {
+					capabilities: {
+						events: ["run.started", "run.completed", "run.failed", "item.appended", "item.updated"],
+					},
+				},
 			});
 		} finally {
 			await server.close();
@@ -152,10 +157,15 @@ describe("createWorkerBeePeer", () => {
 					text: "done",
 				});
 				await sink({
+					type: "assistant.message",
+					runId: request.runId,
+					text: " plus update",
+				});
+				await sink({
 					type: "run.completed",
 					runId: request.runId,
 					stopReason: "completed",
-					finalText: "done",
+					finalText: "done plus update",
 				});
 			},
 		);
@@ -185,8 +195,24 @@ describe("createWorkerBeePeer", () => {
 			);
 
 			await vi.waitFor(() => {
-				expect(server.messages.length).toBeGreaterThanOrEqual(3);
+				expect(server.messages.length).toBe(4);
 			});
+
+			expect(runWorkerMock).toHaveBeenCalledWith(
+				expect.objectContaining({
+					runId: "turn-123",
+					sessionId: "session-123",
+					turnId: "turn-123",
+					conversation: expect.objectContaining({
+						conversationId: "slack:T123:C123:1711111111_000100",
+					}),
+					actor: expect.objectContaining({ userId: "U123", userName: "gunnar" }),
+					message: { text: "Inspect the worker." },
+				}),
+				expect.objectContaining({ workspace: expect.objectContaining({ rootDir: expect.any(String) }) }),
+				expect.any(Function),
+				expect.any(AbortSignal),
+			);
 
 			expect(server.messages).toEqual([
 				expect.objectContaining({
@@ -209,11 +235,66 @@ describe("createWorkerBeePeer", () => {
 				}),
 				expect.objectContaining({
 					type: "event",
+					name: "item.updated",
+					turnId: "turn-123",
+					payload: expect.objectContaining({
+						eventType: "item.updated",
+						itemId: expect.any(String),
+						appendParts: [{ kind: "text", text: " plus update" }],
+					}),
+				}),
+				expect.objectContaining({
+					type: "event",
 					name: "run.completed",
 					turnId: "turn-123",
 					payload: { eventType: "run.completed", stopReason: "completed" },
 				}),
 			]);
+		} finally {
+			await server.close();
+		}
+	});
+
+	it("maps worker exceptions to run.failed Bee Dance event envelopes", async () => {
+		runWorkerMock.mockRejectedValue(new Error("model unavailable"));
+
+		const server = await startBeeServer();
+
+		try {
+			server.input.write(
+				frame({
+					id: "msg-20",
+					type: "command",
+					name: "turn.start",
+					time: new Date().toISOString(),
+					sessionId: "session-err",
+					turnId: "turn-err",
+					from: { kind: "human", id: "U999" },
+					to: { kind: "agent", id: "agent:bee-pi-agent" },
+					replyTo: null,
+					payload: {
+						input: [{ kind: "text", text: "Use a missing model." }],
+						hints: {
+							conversationId: "slack:T999:C999:1711111111_000200",
+							actor: { userId: "U999", userName: "error-user" },
+						},
+					},
+				}),
+			);
+
+			await vi.waitFor(() => {
+				expect(server.messages.length).toBe(1);
+			});
+
+			expect(server.messages[0]).toMatchObject({
+				type: "event",
+				name: "run.failed",
+				sessionId: "session-err",
+				turnId: "turn-err",
+				from: { kind: "agent", id: "agent:bee-pi-agent" },
+				to: { kind: "human", id: "U999" },
+				payload: { eventType: "run.failed", error: "model unavailable" },
+			});
 		} finally {
 			await server.close();
 		}

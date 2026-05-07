@@ -11,7 +11,7 @@ import {
 import { existsSync, mkdirSync, readFileSync } from "fs";
 import { appendFile, writeFile } from "fs/promises";
 import { homedir } from "os";
-import { basename, isAbsolute, join, resolve } from "path";
+import { basename, dirname, isAbsolute, join, resolve } from "path";
 import { createWorkerBlobStore } from "./blob-store.js";
 import { createWorkerSettingsManager, syncLogToSessionManager } from "./context.js";
 import * as log from "./log.js";
@@ -138,14 +138,20 @@ function resolveModelConfig(modelRegistry: ModelRegistry, runtimeConfig: WorkerR
 }
 
 async function getModelApiKey(modelRegistry: ModelRegistry, model: Model<Api>, authPath: string): Promise<string> {
-	const key = await modelRegistry.getApiKey(model);
-	if (!key) {
+	const auth = await modelRegistry.getApiKeyAndHeaders(model);
+	if (!auth.ok) {
+		throw new Error(
+			`${auth.error}\n\n` +
+				`Configure credentials via environment/auth file, or login with npx @mariozechner/pi-ai login ${model.provider} and store the resulting auth.json at ${authPath}`,
+		);
+	}
+	if (!auth.apiKey) {
 		throw new Error(
 			`No API key found for ${model.provider}.\n\n` +
 				`Configure credentials via environment/auth file, or login with npx @mariozechner/pi-ai login ${model.provider} and store the resulting auth.json at ${authPath}`,
 		);
 	}
-	return key;
+	return auth.apiKey;
 }
 
 function getWorkerThinkingLevel(): ThinkingLevel {
@@ -213,6 +219,7 @@ function buildSystemPrompt(
 - Prefer direct answers and concrete actions.
 - Treat the workspace as persistent project state.
 - Use tools rather than guessing when file or shell context matters.
+- For dbt operations, especially dbt show --inline, always use the prod target (--target prod / tool parameter target: "prod") and never use the dev target unless the user explicitly overrides this for a specific command.
 
 ## Workspace Layout
 ${visibleWorkspacePath}/
@@ -405,8 +412,9 @@ export async function runWorker(
 	);
 	const visibleWorkspacePath = executor.getWorkspacePath(workspaceRoot);
 	const authPath = getWorkerAuthPath();
+	const agentDir = dirname(authPath);
 	const authStorage = AuthStorage.create(authPath);
-	const modelRegistry = new ModelRegistry(authStorage);
+	const modelRegistry = ModelRegistry.create(authStorage, join(agentDir, "models.json"));
 	const resolvedRuntimeConfig: WorkerRuntimeConfig = {
 		...runtimeConfig,
 		workspace: {
@@ -449,12 +457,15 @@ export async function runWorker(
 		resolvedRuntimeConfig.workspace.skillsDir || join(resolvedRuntimeConfig.workspace.rootDir, "skills");
 	const resourceLoader = new DefaultResourceLoader({
 		cwd: workingDir,
+		agentDir,
 		settingsManager,
 		additionalSkillPaths: existsSync(workspaceSkillsDir) ? [workspaceSkillsDir] : [],
 		noExtensions: true,
 		noThemes: true,
 		systemPrompt,
-		appendSystemPrompt: resolvedRuntimeConfig.systemPromptAppend,
+		appendSystemPrompt: resolvedRuntimeConfig.systemPromptAppend
+			? [resolvedRuntimeConfig.systemPromptAppend]
+			: undefined,
 		skillsOverride: (base) => ({
 			skills: base.skills.map((skill) => ({
 				...skill,
@@ -487,7 +498,7 @@ export async function runWorker(
 
 	const loadedSession = sessionManager.buildSessionContext();
 	if (loadedSession.messages.length > 0) {
-		agent.replaceMessages(loadedSession.messages);
+		agent.state.messages = loadedSession.messages;
 	}
 
 	const baseToolsOverride = Object.fromEntries(tools.map((tool) => [tool.name, tool]));
@@ -504,7 +515,7 @@ export async function runWorker(
 	const pendingTools = new Map<string, { toolName: string; args: Record<string, unknown>; startTime: number }>();
 	const syncedCount = syncLogToSessionManager(sessionManager, sessionDir);
 	if (syncedCount > 0) {
-		agent.replaceMessages(sessionManager.buildSessionContext().messages);
+		agent.state.messages = sessionManager.buildSessionContext().messages;
 	}
 
 	let stopReason = "stop";
@@ -564,11 +575,11 @@ export async function runWorker(
 			return;
 		}
 
-		if (event.type === "auto_compaction_start") {
+		if (event.type === "compaction_start") {
 			await emit(eventSink, {
 				type: "run.compaction",
 				runId: request.runId,
-				message: `Auto-compaction started (${(event as any).reason})`,
+				message: `Compaction started (${event.reason})`,
 			});
 			return;
 		}

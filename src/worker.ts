@@ -29,9 +29,9 @@ import type {
 const DEFAULT_ANTHROPIC_PROVIDER = "anthropic";
 const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-5";
 const DEFAULT_OPENAI_PROVIDER = "openai";
-const DEFAULT_OPENAI_MODEL = "gpt-5-mini";
+const DEFAULT_OPENAI_MODEL = "gpt-5.5";
 const DEFAULT_OPENAI_CODEX_PROVIDER = "openai-codex";
-const DEFAULT_OPENAI_CODEX_MODEL = "gpt-5.2";
+const DEFAULT_OPENAI_CODEX_MODEL = "gpt-5.5";
 const DEFAULT_THINKING_LEVEL: ThinkingLevel = "off";
 const THINKING_LEVELS = new Set<ThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh"]);
 

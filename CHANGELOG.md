@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.17
+
+- install DejaVu/fontconfig in the container image so Chart.js text rendering shows axis labels, ticks, titles, and data labels in generated PNG artifacts
+
 ## 0.1.16
 
 - render chart artifacts with an explicit white PNG background

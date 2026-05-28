@@ -1,6 +1,8 @@
 # syntax=docker/dockerfile:1.6
 FROM node:20-alpine AS build
 
+RUN apk add --no-cache fontconfig ttf-dejavu
+
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci
@@ -21,6 +23,8 @@ RUN apk add --no-cache \
     curl \
     ripgrep \
     ca-certificates \
+    fontconfig \
+    ttf-dejavu \
     tini \
     python3 \
     py3-pip \

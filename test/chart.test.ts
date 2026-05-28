@@ -170,14 +170,11 @@ describe("chart helpers", () => {
 });
 
 describe("chart tool", () => {
-	it("reads JSON, writes a visible PNG, and registers an image artifact", async () => {
+	it("reads JSON and writes a visible PNG without registering an artifact", async () => {
 		const sessionDir = await tempDir();
 		const inputPath = join(sessionDir, "input.json");
 		await writeFile(inputPath, JSON.stringify({ show: [{ day: "2026-05-01", likes: 7 }] }), "utf-8");
-		const artifacts: unknown[] = [];
-		const tool = createChartTool(async (artifact) => {
-			artifacts.push(artifact);
-		}, sessionDir);
+		const tool = createChartTool(sessionDir);
 
 		const result = await tool.execute("tool-call", {
 			label: "Render chart",
@@ -186,17 +183,14 @@ describe("chart tool", () => {
 			outputName: "likes.png",
 		});
 
-		expect((result.content[0] as { text: string }).text).toContain("Rendered chart artifact likes.png");
+		expect((result.content[0] as { text: string }).text).toContain("Rendered chart file likes.png");
 		const outputPath = join(sessionDir, "outputs", "charts", "likes.png");
 		expect((await readFile(outputPath)).subarray(0, 8).toString("hex")).toBe("89504e470d0a1a0a");
-		expect(artifacts).toEqual([
-			expect.objectContaining({ path: outputPath, name: "likes.png", mimeType: "image/png" }),
-		]);
 	});
 
 	it("rejects non-json input paths", async () => {
 		const sessionDir = await tempDir();
-		const tool = createChartTool(vi.fn(), sessionDir);
+		const tool = createChartTool(sessionDir);
 		await expect(
 			tool.execute("tool-call", {
 				label: "Render chart",
@@ -210,7 +204,7 @@ describe("chart tool", () => {
 		const sessionDir = await tempDir();
 		const inputPath = join(sessionDir, "too-large.json");
 		await writeFile(inputPath, Buffer.alloc(10 * 1024 * 1024 + 1));
-		const tool = createChartTool(vi.fn(), sessionDir);
+		const tool = createChartTool(sessionDir);
 
 		await expect(
 			tool.execute("tool-call", {
@@ -226,8 +220,7 @@ describe("chart tool", () => {
 		const sessionDir = await tempDir();
 		const inputPath = join(sessionDir, "input.json");
 		await writeFile(inputPath, JSON.stringify({ show: [{ day: "2026-05-01", likes: 7 }] }), "utf-8");
-		const artifactHandler = vi.fn();
-		const tool = createChartTool(artifactHandler, sessionDir);
+		const tool = createChartTool(sessionDir);
 
 		await expect(
 			tool.execute("tool-call", {
@@ -236,7 +229,6 @@ describe("chart tool", () => {
 				chartSpec: { type: "bar", x: "day", y: "likes" },
 			}),
 		).rejects.toThrow(/exceeding chart inline-safe limit 1 bytes/);
-		expect(artifactHandler).not.toHaveBeenCalled();
 	});
 });
 

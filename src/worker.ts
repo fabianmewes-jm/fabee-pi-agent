@@ -19,6 +19,7 @@ import { createExecutor, parseSandboxArg, type SandboxConfig, validateSandbox } 
 import { createWorkerTools } from "./tools/index.js";
 import type {
 	InternalWorkerRunRequest,
+	WorkerArtifactRef,
 	WorkerEventSink,
 	WorkerRunEvent,
 	WorkerRunRequest,
@@ -428,6 +429,12 @@ export async function runWorker(
 		},
 	};
 	const blobStore = createWorkerBlobStore(resolvedRuntimeConfig);
+	const pendingArtifacts: WorkerArtifactRef[] = [];
+	const flushPendingArtifacts = async () => {
+		for (const artifact of pendingArtifacts.splice(0)) {
+			await emit(eventSink, { type: "artifact.created", runId: request.runId, artifact });
+		}
+	};
 	const model = resolveModelConfig(modelRegistry, resolvedRuntimeConfig);
 	const memory = getMemory(resolvedRuntimeConfig);
 	const tools = await createWorkerTools({
@@ -442,7 +449,7 @@ export async function runWorker(
 				title: input.title,
 				mimeType: input.mimeType,
 			});
-			await emit(eventSink, { type: "artifact.created", runId: request.runId, artifact });
+			pendingArtifacts.push(artifact);
 		},
 		request,
 		workspaceRoot,
@@ -699,6 +706,8 @@ export async function runWorker(
 		if (finalText.trim()) {
 			await emit(eventSink, { type: "assistant.message", runId: request.runId, text: finalText });
 		}
+
+		await flushPendingArtifacts();
 
 		await emit(eventSink, {
 			type: "run.completed",

@@ -28,12 +28,11 @@ export async function createWorkerTools(args: CreateWorkerToolsArgs): Promise<Ag
 		createWriteTool(args.executor),
 		createAttachTool(args.artifactHandler),
 		createDbtTool(args.executor, args.workspaceRoot, args.workingDir, args.sessionDir),
-		createChartTool(args.artifactHandler, args.sessionDir),
+		createChartTool(args.sessionDir),
 	];
 
 	const extensionTools = await loadWorkerToolExtensions({
 		executor: args.executor,
-		artifactHandler: args.artifactHandler,
 		request: args.request,
 		workspaceRoot: args.workspaceRoot,
 		workingDir: args.workingDir,

@@ -5,7 +5,6 @@ import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { createCanvas } from "@napi-rs/canvas";
 import { Type } from "@sinclair/typebox";
 import { Chart, type ChartConfiguration, type Plugin, registerables } from "chart.js";
-import type { ArtifactHandler } from "./attach.js";
 
 Chart.register(...registerables);
 
@@ -41,7 +40,7 @@ const chartSchema = Type.Object({
 	outputName: Type.Optional(
 		Type.String({ description: "Optional PNG filename. Will be sanitized and forced to .png" }),
 	),
-	title: Type.Optional(Type.String({ description: "Optional artifact/chart title" })),
+	title: Type.Optional(Type.String({ description: "Optional chart title" })),
 	width: Type.Optional(Type.Number({ description: "Chart width in pixels" })),
 	height: Type.Optional(Type.Number({ description: "Chart height in pixels" })),
 });
@@ -528,12 +527,12 @@ async function readRowsFromJsonPath(inputPath: string): Promise<Row[]> {
 	return normalizeRows(parsed);
 }
 
-export function createChartTool(artifactHandler: ArtifactHandler, sessionDir: string): AgentTool<typeof chartSchema> {
+export function createChartTool(sessionDir: string): AgentTool<typeof chartSchema> {
 	return {
 		name: "chart",
 		label: "chart",
 		description:
-			"Render a deterministic PNG chart from a clean JSON file (normally dbt show { show: [...] }) and register it as an image/png artifact. Does not guess columns; provide chartSpec or pieSpec explicitly.",
+			"Render a deterministic PNG chart from a clean JSON file (normally dbt show { show: [...] }) and write it to disk. Does not send/register attachments; use the attach tool explicitly if the PNG should be sent. Does not guess columns; provide chartSpec or pieSpec explicitly.",
 		parameters: chartSchema,
 		execute: async (
 			_toolCallId: string,
@@ -581,17 +580,11 @@ export function createChartTool(artifactHandler: ArtifactHandler, sessionDir: st
 			const outputPath = join(sessionDir, "outputs", "charts", artifactName);
 			await mkdir(dirname(outputPath), { recursive: true });
 			await writeFile(outputPath, buffer);
-			await artifactHandler({
-				path: outputPath,
-				name: artifactName,
-				title: title || artifactName,
-				mimeType: "image/png",
-			});
 			return {
 				content: [
 					{
 						type: "text" as const,
-						text: `Rendered chart artifact ${artifactName} (${buffer.length} bytes, ${renderedWidth}x${renderedHeight}) from ${rows.length} rows.`,
+						text: `Rendered chart file ${artifactName} (${buffer.length} bytes, ${renderedWidth}x${renderedHeight}) from ${rows.length} rows. Use attach to send it.`,
 					},
 				],
 				details: {

@@ -25,10 +25,7 @@ await writeFile(
 	"utf-8",
 );
 
-const artifacts = [];
-const tool = createChartTool(async (artifact) => {
-	artifacts.push(artifact);
-}, sessionDir);
+const tool = createChartTool(sessionDir);
 
 const result = await tool.execute("chart-smoke", {
 	label: "Chart smoke test",
@@ -52,10 +49,6 @@ const magic = png.subarray(0, 8).toString("hex");
 if (magic !== "89504e470d0a1a0a") {
 	throw new Error(`Expected PNG magic header, got ${magic}`);
 }
-if (!artifacts.some((artifact) => artifact.mimeType === "image/png")) {
-	throw new Error("Expected chart smoke artifactHandler to receive mimeType image/png");
-}
-
 const canvas = createCanvas(1, 1);
 console.log(
 	JSON.stringify(
@@ -68,7 +61,6 @@ console.log(
 			outputPath: result.details.outputPath,
 			pngBytes: png.length,
 			magic,
-			artifactMimeTypes: artifacts.map((artifact) => artifact.mimeType),
 		},
 		null,
 		2,

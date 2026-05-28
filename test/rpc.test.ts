@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -14,7 +14,6 @@ vi.mock("../src/worker.js", () => ({
 }));
 
 import { createWorkerBeePeer } from "../src/rpc.js";
-import { createChartTool } from "../src/tools/chart.js";
 import type { InternalWorkerRunRequest, WorkerRuntimeConfig } from "../src/types.js";
 
 type OutboundMessage = Record<string, unknown>;
@@ -257,34 +256,18 @@ describe("createWorkerBeePeer", () => {
 		}
 	});
 
-	it("embeds chart artifacts as PNG data URI artifact refs via blob store plumbing", async () => {
+	it("embeds PNG artifacts as data URI artifact refs via blob store plumbing", async () => {
 		runWorkerMock.mockImplementation(
 			async (request: InternalWorkerRunRequest, runtimeConfig: WorkerRuntimeConfig, sink) => {
-				const sessionDir = join(runtimeConfig.workspace.rootDir, "chart-session");
-				mkdirSync(sessionDir, { recursive: true });
-				const inputPath = join(sessionDir, "input.json");
-				writeFileSync(inputPath, JSON.stringify({ show: [{ day: "2026-05-01", likes: 7 }] }), "utf-8");
-
 				const blobStore = new WorkerLocalBlobStore(runtimeConfig.blobStore.rootDir);
-				const tool = createChartTool(async (inputArtifact) => {
-					const isBufferArtifact = "data" in inputArtifact;
-					const artifact = await blobStore.putArtifact({
-						namespace: `artifacts/${request.sessionId}/${request.runId}`,
-						filePath: isBufferArtifact ? undefined : inputArtifact.path,
-						data: isBufferArtifact ? inputArtifact.data : undefined,
-						name: inputArtifact.name,
-						title: inputArtifact.title,
-						mimeType: inputArtifact.mimeType,
-					});
-					await sink({ type: "artifact.created", runId: request.runId, artifact });
-				}, sessionDir);
-
-				await tool.execute("tool-chart", {
-					label: "Render chart",
-					inputPath,
-					chartSpec: { type: "bar", x: "day", y: "likes", title: "Likes" },
-					outputName: "likes.png",
+				const artifact = await blobStore.putArtifact({
+					namespace: `artifacts/${request.sessionId}/${request.runId}`,
+					data: Buffer.from("89504e470d0a1a0a", "hex"),
+					name: "likes.png",
+					title: "likes.png",
+					mimeType: "image/png",
 				});
+				await sink({ type: "artifact.created", runId: request.runId, artifact });
 				await sink({ type: "run.completed", runId: request.runId, stopReason: "completed" });
 			},
 		);

@@ -28,7 +28,8 @@ export function createAttachTool(uploadFn: ArtifactHandler): AgentTool<typeof at
 	return {
 		name: "attach",
 		label: "attach",
-		description: "Expose a file path as a worker artifact event for the gateway or orchestrator.",
+		description:
+			"Send/expose a file path as a worker artifact event for the gateway or orchestrator. This is the only built-in tool that sends attachments.",
 		parameters: attachSchema,
 		execute: async (
 			_toolCallId: string,

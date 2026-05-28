@@ -2,6 +2,8 @@
 
 ## 0.1.17
 
+- make `attach` the only built-in tool that emits attachment artifacts; `chart` now only writes PNG files for explicit attachment
+- defer emitted artifacts until after the final assistant text so images arrive after the answer
 - install DejaVu/fontconfig in the container image so Chart.js text rendering shows axis labels, ticks, titles, and data labels in generated PNG artifacts
 
 ## 0.1.16

@@ -10,7 +10,7 @@ async function tempDir(): Promise<string> {
 }
 
 describe("dbt to chart complete flow", () => {
-	it("writes dbt JSON output and renders it into a registered PNG chart artifact", async () => {
+	it("writes dbt JSON output and renders it into a PNG chart file", async () => {
 		const sessionDir = await tempDir();
 		const exec = vi.fn().mockResolvedValue({
 			stdout: JSON.stringify({
@@ -45,10 +45,7 @@ describe("dbt to chart complete flow", () => {
 			],
 		});
 
-		const artifacts: unknown[] = [];
-		const chart = createChartTool(async (artifact) => {
-			artifacts.push(artifact);
-		}, sessionDir);
+		const chart = createChartTool(sessionDir);
 
 		const chartResult = await chart.execute("chart", {
 			label: "Render applications chart",
@@ -67,15 +64,7 @@ describe("dbt to chart complete flow", () => {
 		const png = await readFile(pngPath);
 		expect(png.subarray(0, 8).toString("hex")).toBe("89504e470d0a1a0a");
 		expect((chartResult.content[0] as { text: string }).text).toContain(
-			"Rendered chart artifact applications-2026-by-month.png",
+			"Rendered chart file applications-2026-by-month.png",
 		);
-		expect(artifacts).toEqual([
-			expect.objectContaining({
-				path: pngPath,
-				name: "applications-2026-by-month.png",
-				title: "Applications 2026 by month",
-				mimeType: "image/png",
-			}),
-		]);
 	});
 });

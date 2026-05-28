@@ -4,7 +4,7 @@ import { basename, dirname, extname, join } from "node:path";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { createCanvas } from "@napi-rs/canvas";
 import { Type } from "@sinclair/typebox";
-import { Chart, type ChartConfiguration, registerables } from "chart.js";
+import { Chart, type ChartConfiguration, type Plugin, registerables } from "chart.js";
 import type { ArtifactHandler } from "./attach.js";
 
 Chart.register(...registerables);
@@ -69,6 +69,7 @@ export interface ChartSpec {
 	missingValue?: number | null;
 	allowNullValues?: boolean;
 	palette?: string[];
+	dataLabels?: boolean;
 }
 
 export interface PieSpec {
@@ -84,6 +85,7 @@ export interface PieSpec {
 	groupOthers?: boolean;
 	otherLabel?: string;
 	palette?: string[];
+	dataLabels?: boolean;
 }
 
 function isRecord(value: unknown): value is Row {
@@ -194,6 +196,64 @@ function uniqueByString(values: unknown[], sort = false): string[] {
 	return sort ? unique.sort((a, b) => a.localeCompare(b)) : unique;
 }
 
+function humanizeFieldName(field: string | undefined, fallback: string): string {
+	if (!field) return fallback;
+	return field
+		.replace(/^[0-9]+_/, "")
+		.replace(/__/g, " ")
+		.replace(/[_-]+/g, " ")
+		.replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function formatChartValue(value: unknown): string {
+	if (typeof value === "number" && Number.isFinite(value)) {
+		return new Intl.NumberFormat("de-DE", { maximumFractionDigits: 2 }).format(value);
+	}
+	return String(value ?? "");
+}
+
+const whiteBackgroundPlugin: Plugin = {
+	id: "fabeeWhiteBackground",
+	beforeDraw: (chart) => {
+		const { ctx, height, width } = chart;
+		ctx.save();
+		ctx.globalCompositeOperation = "destination-over";
+		ctx.fillStyle = "#ffffff";
+		ctx.fillRect(0, 0, width, height);
+		ctx.restore();
+	},
+};
+
+const valueLabelsPlugin: Plugin = {
+	id: "fabeeValueLabels",
+	afterDatasetsDraw: (chart) => {
+		const pluginOptions = (chart.options.plugins as Record<string, unknown> | undefined)?.fabeeValueLabels as
+			| { display?: boolean }
+			| undefined;
+		if (pluginOptions?.display === false) return;
+		const { ctx } = chart;
+		ctx.save();
+		ctx.fillStyle = "#111827";
+		ctx.font = "600 12px sans-serif";
+		ctx.textAlign = "center";
+		ctx.textBaseline = "bottom";
+
+		for (const dataset of chart.data.datasets) {
+			const datasetIndex = chart.data.datasets.indexOf(dataset);
+			const meta = chart.getDatasetMeta(datasetIndex);
+			if (meta.hidden) continue;
+			for (let index = 0; index < meta.data.length; index += 1) {
+				const rawValue = Array.isArray(dataset.data) ? dataset.data[index] : undefined;
+				if (rawValue === null || rawValue === undefined) continue;
+				const point = meta.data[index]?.tooltipPosition(true);
+				if (!point || point.x === null || point.y === null) continue;
+				ctx.fillText(formatChartValue(rawValue), point.x, Math.max(14, point.y - 6));
+			}
+		}
+		ctx.restore();
+	},
+};
+
 function datasetStyle(index: number, type: ChartType, palette: string[]) {
 	const color = palette[index % palette.length];
 	return {
@@ -301,25 +361,38 @@ export function buildChartConfigFromRows(rows: Row[], rawSpec: unknown): ChartCo
 		];
 	}
 
+	const xAxisLabel = spec.xLabel || spec.labels?.[spec.x] || humanizeFieldName(spec.x, "X");
+	const yAxisLabel = spec.yLabel || spec.labels?.[spec.y as string] || humanizeFieldName(spec.y, "Value");
+
 	return {
 		type: spec.type,
 		data: { labels, datasets },
 		options: {
 			responsive: false,
 			animation: false,
+			layout: { padding: { top: spec.dataLabels === false ? 8 : 24, right: 12, bottom: 4, left: 4 } },
 			plugins: {
-				title: { display: Boolean(spec.title), text: spec.title },
-				legend: { display: datasets.length > 1, position: spec.legendPosition || "bottom" },
+				title: { display: Boolean(spec.title), text: spec.title, color: "#111827" },
+				legend: {
+					display: datasets.length > 1,
+					position: spec.legendPosition || "bottom",
+					labels: { color: "#111827" },
+				},
+				...({ fabeeValueLabels: { display: spec.dataLabels !== false } } as Record<string, unknown>),
 			},
 			scales: {
 				y: {
 					beginAtZero: true,
 					stacked: Boolean(spec.stacked),
-					title: { display: Boolean(spec.yLabel || spec.y), text: spec.yLabel || spec.y || "value" },
+					ticks: { color: "#111827" },
+					grid: { color: "#e5e7eb" },
+					title: { display: true, text: yAxisLabel, color: "#111827" },
 				},
 				x: {
 					stacked: Boolean(spec.stacked),
-					title: { display: Boolean(spec.xLabel || spec.x), text: spec.xLabel || spec.x },
+					ticks: { color: "#111827" },
+					grid: { color: "#f3f4f6" },
+					title: { display: true, text: xAxisLabel, color: "#111827" },
 				},
 			},
 		},
@@ -380,9 +453,11 @@ export function buildPieChartConfigFromRows(rows: Row[], rawSpec: unknown): Char
 		options: {
 			responsive: false,
 			animation: false,
+			layout: { padding: 12 },
 			plugins: {
-				title: { display: Boolean(spec.title), text: spec.title },
-				legend: { display: true, position: spec.legendPosition || "right" },
+				title: { display: Boolean(spec.title), text: spec.title, color: "#111827" },
+				legend: { display: true, position: spec.legendPosition || "right", labels: { color: "#111827" } },
+				...({ fabeeValueLabels: { display: spec.dataLabels !== false } } as Record<string, unknown>),
 			},
 		},
 	};
@@ -391,9 +466,11 @@ export function buildPieChartConfigFromRows(rows: Row[], rawSpec: unknown): Char
 export function renderChartConfigToPng(config: ChartConfiguration, width: number, height: number): Buffer {
 	const canvas = createCanvas(width, height);
 	const context = canvas.getContext("2d");
-	context.fillStyle = "white";
-	context.fillRect(0, 0, width, height);
-	const chart = new Chart(context as never, config);
+	const chartConfig: ChartConfiguration = {
+		...config,
+		plugins: [whiteBackgroundPlugin, valueLabelsPlugin, ...(config.plugins || [])],
+	};
+	const chart = new Chart(context as never, chartConfig);
 	chart.update();
 	const buffer = canvas.toBuffer("image/png");
 	chart.destroy();

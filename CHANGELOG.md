@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.16
+
+- render chart artifacts with an explicit white PNG background
+- show X/Y axis labels by default, deriving readable labels from field names when labels are not provided
+- show data value labels on charts by default, with `dataLabels: false` available as an opt-out
+
 ## 0.1.14
 
 - upgrade pi runtime packages to `0.73.0` and adapt worker integration to the updated APIs

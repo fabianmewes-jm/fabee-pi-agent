@@ -37,6 +37,10 @@ describe("chart helpers", () => {
 			],
 			{ type: "bar", x: "day", y: "likes", title: "Likes" },
 		);
+		const scales = config.options?.scales as Record<string, { title?: { display?: boolean; text?: string } }>;
+		expect(scales.x.title).toMatchObject({ display: true, text: "Day" });
+		expect(scales.y.title).toMatchObject({ display: true, text: "Likes" });
+		expect((config.options?.plugins as Record<string, unknown>).fabeeValueLabels).toMatchObject({ display: true });
 		const png = renderChartConfigToPng(config, 600, 300);
 		expect(png.subarray(0, 8).toString("hex")).toBe("89504e470d0a1a0a");
 		expect(png.length).toBeGreaterThan(1000);

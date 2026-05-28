@@ -6,6 +6,7 @@ COPY package*.json ./
 RUN npm ci
 COPY . .
 RUN npm run build && npm prune --omit=dev
+RUN npm run smoke:chart
 
 FROM node:20-alpine
 

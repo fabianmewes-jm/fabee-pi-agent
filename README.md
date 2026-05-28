@@ -82,6 +82,7 @@ Primary variables:
 - `BEE_PI_AGENT_DOCKER_WORKSPACE_ROOT` optional visible workspace root inside docker, default `/workspace`
 - `BEE_PI_AGENT_SYSTEM_PROMPT_APPEND` optional additional fixed instructions
 - `BEE_PI_AGENT_BLOB_STORE_ROOT` optional blob-store root for attachments and artifacts
+- `BEE_PI_AGENT_ARTIFACT_INLINE_MAX_BYTES` optional max artifact size embedded into Bee Dance `artifactRef.uri` for downstream uploads; default `750000`
 - `BEE_PI_AGENT_AUTH_FILE` optional auth file override
 - `BEE_PI_AGENT_MODEL_PROVIDER` optional provider override
 - `BEE_PI_AGENT_MODEL_ID` optional model override
@@ -107,7 +108,9 @@ The worker now includes a built-in `dbt` tool so the agent can:
 - list models and analyses via `dbt list`
 - preview model output via `dbt show --select ...`
 - execute inline SQL via `dbt show --inline ...`
-- run targeted `dbt build`, `compile`, `run`, `test`, and `parse`
+- run targeted `dbt compile`, `test`, and `parse`
+
+The tool intentionally does not expose `dbt build` or `dbt run`; analytics answers should query already-built prod models rather than building models from Slack-triggered turns.
 
 For reliable operation outside a dbt repo, set:
 

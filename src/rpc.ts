@@ -409,11 +409,13 @@ function createArtifactRefPart(
 	return part;
 }
 
+const DEFAULT_ARTIFACT_INLINE_MAX_BYTES = 5_000_000;
+
 function getArtifactInlineMaxBytes(): number {
 	const raw = process.env.BEE_PI_AGENT_ARTIFACT_INLINE_MAX_BYTES;
-	if (!raw) return 750_000;
+	if (!raw) return DEFAULT_ARTIFACT_INLINE_MAX_BYTES;
 	const parsed = Number.parseInt(raw, 10);
-	return Number.isFinite(parsed) && parsed >= 0 ? parsed : 750_000;
+	return Number.isFinite(parsed) && parsed >= 0 ? parsed : DEFAULT_ARTIFACT_INLINE_MAX_BYTES;
 }
 
 function buildArtifactDataUri(artifact: WorkerArtifactRef, runtimeConfig: WorkerRuntimeConfig): string | undefined {

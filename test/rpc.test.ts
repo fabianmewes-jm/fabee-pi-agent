@@ -334,6 +334,69 @@ describe("createWorkerBeePeer", () => {
 		}
 	});
 
+	it("embeds artifacts up to the 5 MB default inline limit", async () => {
+		const previousLimit = process.env.BEE_PI_AGENT_ARTIFACT_INLINE_MAX_BYTES;
+		const csvSizeBytes = 4_900_000;
+		delete process.env.BEE_PI_AGENT_ARTIFACT_INLINE_MAX_BYTES;
+		runWorkerMock.mockImplementation(
+			async (request: InternalWorkerRunRequest, runtimeConfig: WorkerRuntimeConfig, sink) => {
+				const blobStore = new WorkerLocalBlobStore(runtimeConfig.blobStore.rootDir);
+				const artifact = await blobStore.putArtifact({
+					namespace: `artifacts/${request.sessionId}/${request.runId}`,
+					data: Buffer.alloc(csvSizeBytes, "a"),
+					name: "report.csv",
+					title: "report.csv",
+					mimeType: "text/csv",
+				});
+				await sink({ type: "artifact.created", runId: request.runId, artifact });
+				await sink({ type: "run.completed", runId: request.runId, stopReason: "completed" });
+			},
+		);
+
+		const server = await startBeeServer();
+
+		try {
+			server.input.write(
+				frame({
+					id: "msg-large-artifact",
+					type: "command",
+					name: "turn.start",
+					time: new Date().toISOString(),
+					sessionId: "session-123",
+					turnId: "turn-large-artifact",
+					from: { kind: "human", id: "U123" },
+					to: { kind: "agent", id: "agent:bee-pi-agent" },
+					replyTo: null,
+					payload: {
+						input: [{ kind: "text", text: "Create a CSV." }],
+					},
+				}),
+			);
+
+			await vi.waitFor(() => {
+				expect(server.messages.length).toBe(2);
+			});
+
+			const artifactRef = (
+				server.messages[0] as {
+					payload: {
+						item: { parts: Array<{ kind: string; uri?: string; sizeBytes?: number; mimeType?: string }> };
+					};
+				}
+			).payload.item.parts[0];
+			expect(artifactRef.mimeType).toBe("text/csv");
+			expect(artifactRef.sizeBytes).toBe(csvSizeBytes);
+			expect(artifactRef.uri).toMatch(/^data:text\/csv;base64,/);
+		} finally {
+			if (previousLimit === undefined) {
+				delete process.env.BEE_PI_AGENT_ARTIFACT_INLINE_MAX_BYTES;
+			} else {
+				process.env.BEE_PI_AGENT_ARTIFACT_INLINE_MAX_BYTES = previousLimit;
+			}
+			await server.close();
+		}
+	});
+
 	it("maps worker exceptions to run.failed Bee Dance event envelopes", async () => {
 		runWorkerMock.mockRejectedValue(new Error("model unavailable"));
 

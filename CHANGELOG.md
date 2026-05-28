@@ -2,6 +2,7 @@
 
 ## 0.1.18
 
+- increase the default artifact inline limit to 5 MB and mark attached `.csv` files as `text/csv` for Slack uploads
 - make `attach` the only built-in tool that emits attachment artifacts; `chart` now only writes PNG files for explicit attachment
 - defer emitted artifacts until after the final assistant text so images arrive after the answer
 

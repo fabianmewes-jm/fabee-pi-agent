@@ -2,7 +2,21 @@ import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { Type } from "@sinclair/typebox";
 import { basename, resolve as resolvePath } from "path";
 
-export type ArtifactHandler = (filePath: string, title?: string) => Promise<void>;
+export type ArtifactInput =
+	| {
+			path: string;
+			name?: string;
+			title?: string;
+			mimeType?: string;
+	  }
+	| {
+			data: Buffer;
+			name: string;
+			title?: string;
+			mimeType: string;
+	  };
+
+export type ArtifactHandler = (artifact: ArtifactInput) => Promise<void>;
 
 const attachSchema = Type.Object({
 	label: Type.String({ description: "Brief description of what you're sharing (shown to user)" }),
@@ -27,7 +41,7 @@ export function createAttachTool(uploadFn: ArtifactHandler): AgentTool<typeof at
 
 			const absolutePath = resolvePath(path);
 			const fileName = title || basename(absolutePath);
-			await uploadFn(absolutePath, fileName);
+			await uploadFn({ path: absolutePath, name: basename(absolutePath), title: fileName });
 
 			return {
 				content: [{ type: "text" as const, text: `Registered artifact: ${fileName}` }],

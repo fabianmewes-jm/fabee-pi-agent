@@ -5,3 +5,4 @@ node_modules/
 .envrc
 .Rhistory
 .pi/
+run-logs/

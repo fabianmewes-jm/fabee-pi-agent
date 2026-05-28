@@ -1,8 +1,9 @@
-import { mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { WorkerLocalBlobStore } from "../src/blob-store.js";
 
 const { runWorkerMock } = vi.hoisted(() => ({
 	runWorkerMock: vi.fn(),
@@ -13,6 +14,7 @@ vi.mock("../src/worker.js", () => ({
 }));
 
 import { createWorkerBeePeer } from "../src/rpc.js";
+import { createChartTool } from "../src/tools/chart.js";
 import type { InternalWorkerRunRequest, WorkerRuntimeConfig } from "../src/types.js";
 
 type OutboundMessage = Record<string, unknown>;
@@ -250,6 +252,100 @@ describe("createWorkerBeePeer", () => {
 					payload: { eventType: "run.completed", stopReason: "completed" },
 				}),
 			]);
+		} finally {
+			await server.close();
+		}
+	});
+
+	it("embeds chart artifacts as PNG data URI artifact refs via blob store plumbing", async () => {
+		runWorkerMock.mockImplementation(
+			async (request: InternalWorkerRunRequest, runtimeConfig: WorkerRuntimeConfig, sink) => {
+				const sessionDir = join(runtimeConfig.workspace.rootDir, "chart-session");
+				mkdirSync(sessionDir, { recursive: true });
+				const inputPath = join(sessionDir, "input.json");
+				writeFileSync(inputPath, JSON.stringify({ show: [{ day: "2026-05-01", likes: 7 }] }), "utf-8");
+
+				const blobStore = new WorkerLocalBlobStore(runtimeConfig.blobStore.rootDir);
+				const tool = createChartTool(async (inputArtifact) => {
+					const isBufferArtifact = "data" in inputArtifact;
+					const artifact = await blobStore.putArtifact({
+						namespace: `artifacts/${request.sessionId}/${request.runId}`,
+						filePath: isBufferArtifact ? undefined : inputArtifact.path,
+						data: isBufferArtifact ? inputArtifact.data : undefined,
+						name: inputArtifact.name,
+						title: inputArtifact.title,
+						mimeType: inputArtifact.mimeType,
+					});
+					await sink({ type: "artifact.created", runId: request.runId, artifact });
+				}, sessionDir);
+
+				await tool.execute("tool-chart", {
+					label: "Render chart",
+					inputPath,
+					chartSpec: { type: "bar", x: "day", y: "likes", title: "Likes" },
+					outputName: "likes.png",
+				});
+				await sink({ type: "run.completed", runId: request.runId, stopReason: "completed" });
+			},
+		);
+
+		const server = await startBeeServer();
+
+		try {
+			server.input.write(
+				frame({
+					id: "msg-artifact",
+					type: "command",
+					name: "turn.start",
+					time: new Date().toISOString(),
+					sessionId: "session-123",
+					turnId: "turn-artifact",
+					from: { kind: "human", id: "U123" },
+					to: { kind: "agent", id: "agent:bee-pi-agent" },
+					replyTo: null,
+					payload: {
+						input: [{ kind: "text", text: "Create a chart." }],
+					},
+				}),
+			);
+
+			await vi.waitFor(() => {
+				expect(server.messages.length).toBe(2);
+			});
+
+			expect(server.messages[0]).toMatchObject({
+				type: "event",
+				name: "item.appended",
+				payload: {
+					eventType: "item.appended",
+					item: {
+						kind: "artifact",
+						parts: [
+							expect.objectContaining({
+								kind: "artifactRef",
+								name: "likes.png",
+								title: "likes.png",
+								mimeType: "image/png",
+								sizeBytes: expect.any(Number),
+							}),
+						],
+					},
+				},
+			});
+
+			const artifactRef = (
+				server.messages[0] as {
+					payload: {
+						item: { parts: Array<{ kind: string; uri?: string; sizeBytes?: number; mimeType?: string }> };
+					};
+				}
+			).payload.item.parts[0];
+			expect(artifactRef.mimeType).toBe("image/png");
+			expect(artifactRef.uri).toMatch(/^data:image\/png;base64,/);
+			expect(artifactRef.sizeBytes).toBeGreaterThan(0);
+
+			const png = Buffer.from(artifactRef.uri?.replace(/^data:image\/png;base64,/, "") || "", "base64");
+			expect(png.subarray(0, 8).toString("hex")).toBe("89504e470d0a1a0a");
 		} finally {
 			await server.close();
 		}

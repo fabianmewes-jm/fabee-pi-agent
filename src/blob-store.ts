@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import { copyFile, mkdir, stat } from "fs/promises";
+import { copyFile, mkdir, stat, writeFile } from "fs/promises";
 import { dirname, extname, join } from "path";
 import type { WorkerArtifactRef, WorkerAttachmentInput, WorkerRuntimeConfig } from "./types.js";
 
@@ -41,16 +41,24 @@ export class WorkerLocalBlobStore {
 
 	async putArtifact(args: {
 		namespace: string;
-		filePath: string;
+		filePath?: string;
+		data?: Buffer;
 		name?: string;
 		title?: string;
 		mimeType?: string;
 	}): Promise<WorkerArtifactRef> {
+		if (!args.filePath && !args.data) {
+			throw new Error("putArtifact requires either filePath or data");
+		}
 		const artifactId = randomUUID();
 		const blobKey = buildBlobKey(args.namespace, artifactId, args.name);
 		const targetPath = join(this.rootDir, blobKey);
 		await ensureParent(targetPath);
-		await copyFile(args.filePath, targetPath);
+		if (args.data) {
+			await writeFile(targetPath, args.data);
+		} else if (args.filePath) {
+			await copyFile(args.filePath, targetPath);
+		}
 		const details = await stat(targetPath);
 		return {
 			artifactId,

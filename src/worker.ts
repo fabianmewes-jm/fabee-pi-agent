@@ -432,12 +432,15 @@ export async function runWorker(
 	const memory = getMemory(resolvedRuntimeConfig);
 	const tools = await createWorkerTools({
 		executor,
-		artifactHandler: async (path, title) => {
+		artifactHandler: async (input) => {
+			const isBufferArtifact = "data" in input;
 			const artifact = await blobStore.putArtifact({
 				namespace: `artifacts/${request.sessionId}/${request.runId}`,
-				filePath: path,
-				name: title || basename(path),
-				title,
+				filePath: isBufferArtifact ? undefined : input.path,
+				data: isBufferArtifact ? input.data : undefined,
+				name: input.name || (isBufferArtifact ? undefined : basename(input.path)),
+				title: input.title,
+				mimeType: input.mimeType,
 			});
 			await emit(eventSink, { type: "artifact.created", runId: request.runId, artifact });
 		},

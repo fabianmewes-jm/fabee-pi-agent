@@ -1,12 +1,20 @@
 import { randomUUID } from "node:crypto";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { createServer, type Socket } from "node:net";
+import { join } from "node:path";
 import type { Readable, Writable } from "node:stream";
 import { assertValidEnvelope, type Envelope, type Item, type ProtocolCapabilities } from "@jobmatchme/bee-dance-core";
 import { BEE_PROTOCOL_VERSION_MANIFEST } from "@jobmatchme/bee-dance-schema";
 import { loadWorkerRuntimeConfigFromEnv } from "./config.js";
 import * as log from "./log.js";
-import type { InternalWorkerRunRequest, WorkerActorInput, WorkerRunEvent, WorkerRuntimeConfig } from "./types.js";
+import type {
+	InternalWorkerRunRequest,
+	WorkerActorInput,
+	WorkerArtifactRef,
+	WorkerRunEvent,
+	WorkerRuntimeConfig,
+} from "./types.js";
 import { runWorker } from "./worker.js";
 
 const DEFAULT_CAPABILITIES: ProtocolCapabilities = {
@@ -184,7 +192,7 @@ export function createWorkerBeePeer(
 				request,
 				runtimeConfig,
 				async (event) => {
-					for (const envelope of mapEventToBeeEnvelopes(event, activeRun, requester)) {
+					for (const envelope of mapEventToBeeEnvelopes(event, activeRun, requester, runtimeConfig)) {
 						writeEnvelope(output, envelope);
 					}
 				},
@@ -323,6 +331,7 @@ function mapEventToBeeEnvelopes(
 	event: WorkerRunEvent,
 	activeRun: ActiveTurnState,
 	requester: Envelope["from"],
+	runtimeConfig: WorkerRuntimeConfig,
 ): Envelope[] {
 	switch (event.type) {
 		case "run.started":
@@ -374,21 +383,64 @@ function mapEventToBeeEnvelopes(
 						id: `item_${randomUUID()}`,
 						kind: "artifact",
 						role: "assistant",
-						parts: [
-							{
-								kind: "artifactRef",
-								artifactId: event.artifact.artifactId,
-								name: event.artifact.name,
-								title: event.artifact.title,
-								mimeType: event.artifact.mimeType,
-								sizeBytes: event.artifact.sizeBytes,
-							},
-						],
+						parts: [createArtifactRefPart(event.artifact, runtimeConfig)],
 					},
 				}),
 			];
 		default:
 			return [];
+	}
+}
+
+function createArtifactRefPart(
+	artifact: WorkerArtifactRef,
+	runtimeConfig: WorkerRuntimeConfig,
+): Extract<Item["parts"][number], { kind: "artifactRef" }> {
+	const part: Extract<Item["parts"][number], { kind: "artifactRef" }> = {
+		kind: "artifactRef",
+		artifactId: artifact.artifactId,
+	};
+	if (artifact.name) part.name = artifact.name;
+	if (artifact.title) part.title = artifact.title;
+	if (artifact.mimeType) part.mimeType = artifact.mimeType;
+	const uri = buildArtifactDataUri(artifact, runtimeConfig);
+	if (uri) part.uri = uri;
+	if (artifact.sizeBytes !== undefined) part.sizeBytes = artifact.sizeBytes;
+	return part;
+}
+
+function getArtifactInlineMaxBytes(): number {
+	const raw = process.env.BEE_PI_AGENT_ARTIFACT_INLINE_MAX_BYTES;
+	if (!raw) return 750_000;
+	const parsed = Number.parseInt(raw, 10);
+	return Number.isFinite(parsed) && parsed >= 0 ? parsed : 750_000;
+}
+
+function buildArtifactDataUri(artifact: WorkerArtifactRef, runtimeConfig: WorkerRuntimeConfig): string | undefined {
+	if (!artifact.blobKey) return undefined;
+	const artifactPath = join(runtimeConfig.blobStore.rootDir, artifact.blobKey);
+	if (!existsSync(artifactPath)) return undefined;
+
+	try {
+		const maxBytes = getArtifactInlineMaxBytes();
+		const details = statSync(artifactPath);
+		if (details.size > maxBytes) {
+			log.logWarning(
+				"system",
+				`Artifact ${artifact.name || artifact.artifactId} is ${details.size} bytes; omitting inline URI because limit is ${maxBytes} bytes`,
+			);
+			return undefined;
+		}
+
+		const mimeType = artifact.mimeType || "application/octet-stream";
+		const data = readFileSync(artifactPath).toString("base64");
+		return `data:${mimeType};base64,${data}`;
+	} catch (error) {
+		log.logWarning(
+			"system",
+			`Failed to inline artifact ${artifact.name || artifact.artifactId}: ${error instanceof Error ? error.message : String(error)}`,
+		);
+		return undefined;
 	}
 }
 

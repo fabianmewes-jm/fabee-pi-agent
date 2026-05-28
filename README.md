@@ -82,7 +82,7 @@ Primary variables:
 - `BEE_PI_AGENT_DOCKER_WORKSPACE_ROOT` optional visible workspace root inside docker, default `/workspace`
 - `BEE_PI_AGENT_SYSTEM_PROMPT_APPEND` optional additional fixed instructions
 - `BEE_PI_AGENT_BLOB_STORE_ROOT` optional blob-store root for attachments and artifacts
-- `BEE_PI_AGENT_ARTIFACT_INLINE_MAX_BYTES` optional max artifact size embedded into Bee Dance `artifactRef.uri` for downstream uploads; default `750000`
+- `BEE_PI_AGENT_ARTIFACT_INLINE_MAX_BYTES` optional max artifact size embedded into Bee Dance `artifactRef.uri` for downstream uploads; default `5000000` (5 MB). Because inline artifacts are base64-encoded in Bee Dance events, the NATS/server transport payload limit must allow roughly 1.4x this size plus envelope overhead.
 - `BEE_PI_AGENT_AUTH_FILE` optional auth file override
 - `BEE_PI_AGENT_MODEL_PROVIDER` optional provider override
 - `BEE_PI_AGENT_MODEL_ID` optional model override

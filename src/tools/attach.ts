@@ -1,6 +1,6 @@
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { Type } from "@sinclair/typebox";
-import { basename, resolve as resolvePath } from "path";
+import { basename, extname, resolve as resolvePath } from "path";
 
 export type ArtifactInput =
 	| {
@@ -24,6 +24,11 @@ const attachSchema = Type.Object({
 	title: Type.Optional(Type.String({ description: "Optional title for the artifact" })),
 });
 
+function mimeTypeForPath(path: string): string | undefined {
+	if (extname(path).toLowerCase() === ".csv") return "text/csv";
+	return undefined;
+}
+
 export function createAttachTool(uploadFn: ArtifactHandler): AgentTool<typeof attachSchema> {
 	return {
 		name: "attach",
@@ -42,7 +47,12 @@ export function createAttachTool(uploadFn: ArtifactHandler): AgentTool<typeof at
 
 			const absolutePath = resolvePath(path);
 			const fileName = title || basename(absolutePath);
-			await uploadFn({ path: absolutePath, name: basename(absolutePath), title: fileName });
+			await uploadFn({
+				path: absolutePath,
+				name: basename(absolutePath),
+				title: fileName,
+				mimeType: mimeTypeForPath(absolutePath),
+			});
 
 			return {
 				content: [{ type: "text" as const, text: `Registered artifact: ${fileName}` }],

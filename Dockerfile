@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.6
-FROM node:20-alpine AS build
+FROM node:22-alpine AS build
 
 RUN apk add --no-cache fontconfig ttf-dejavu
 
@@ -10,7 +10,7 @@ COPY . .
 RUN npm run build && npm prune --omit=dev
 RUN npm run smoke:chart
 
-FROM node:20-alpine
+FROM node:22-alpine
 
 ARG OCI_SOURCE=https://github.com/fabianmewes-jm/Fabee-pi-agent
 LABEL org.opencontainers.image.source="${OCI_SOURCE}"

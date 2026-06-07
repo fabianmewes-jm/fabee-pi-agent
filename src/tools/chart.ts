@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join } from "node:path";
-import type { AgentTool } from "@mariozechner/pi-agent-core";
+import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { createCanvas } from "@napi-rs/canvas";
 import { Type } from "@sinclair/typebox";
 import { Chart, type ChartConfiguration, type Plugin, registerables } from "chart.js";

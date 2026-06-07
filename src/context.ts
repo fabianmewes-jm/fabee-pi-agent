@@ -6,8 +6,8 @@
  * - synced log input is optional and generic, not Slack-specific
  */
 
-import type { UserMessage } from "@mariozechner/pi-ai";
-import { SessionManager, type SessionMessageEntry, SettingsManager } from "@mariozechner/pi-coding-agent";
+import type { UserMessage } from "@earendil-works/pi-ai";
+import { SessionManager, type SessionMessageEntry, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
 import type { WorkerSessionTranscriptEntry } from "./types.js";

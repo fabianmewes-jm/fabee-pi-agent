@@ -1,6 +1,6 @@
 import { isAbsolute, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { AgentTool } from "@mariozechner/pi-agent-core";
+import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { Executor } from "../sandbox.js";
 import type { WorkerRunRequest } from "../types.js";
 export interface WorkerToolExtensionContext {

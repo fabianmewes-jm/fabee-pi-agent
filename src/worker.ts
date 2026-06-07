@@ -1,5 +1,5 @@
-import { Agent, type AgentEvent, type AgentTool, type ThinkingLevel } from "@mariozechner/pi-agent-core";
-import type { Api, ImageContent, Model } from "@mariozechner/pi-ai";
+import { Agent, type AgentEvent, type AgentTool, type ThinkingLevel } from "@earendil-works/pi-agent-core";
+import type { Api, ImageContent, Model } from "@earendil-works/pi-ai";
 import {
 	AgentSession,
 	AuthStorage,
@@ -7,7 +7,7 @@ import {
 	DefaultResourceLoader,
 	ModelRegistry,
 	SessionManager,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 import { existsSync, mkdirSync, readFileSync } from "fs";
 import { appendFile, writeFile } from "fs/promises";
 import { homedir } from "os";
@@ -143,13 +143,13 @@ async function getModelApiKey(modelRegistry: ModelRegistry, model: Model<Api>, a
 	if (!auth.ok) {
 		throw new Error(
 			`${auth.error}\n\n` +
-				`Configure credentials via environment/auth file, or login with npx @mariozechner/pi-ai login ${model.provider} and store the resulting auth.json at ${authPath}`,
+				`Configure credentials via environment/auth file, or login with npx @earendil-works/pi-ai login ${model.provider} and store the resulting auth.json at ${authPath}`,
 		);
 	}
 	if (!auth.apiKey) {
 		throw new Error(
 			`No API key found for ${model.provider}.\n\n` +
-				`Configure credentials via environment/auth file, or login with npx @mariozechner/pi-ai login ${model.provider} and store the resulting auth.json at ${authPath}`,
+				`Configure credentials via environment/auth file, or login with npx @earendil-works/pi-ai login ${model.provider} and store the resulting auth.json at ${authPath}`,
 		);
 	}
 	return auth.apiKey;

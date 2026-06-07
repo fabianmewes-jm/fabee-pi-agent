@@ -1,4 +1,4 @@
-import type { AgentTool } from "@mariozechner/pi-agent-core";
+import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { Executor } from "../sandbox.js";
 import type { WorkerRunRequest } from "../types.js";
 import { type ArtifactHandler, createAttachTool } from "./attach.js";

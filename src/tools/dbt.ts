@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { mkdir, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
-import type { AgentTool } from "@mariozechner/pi-agent-core";
+import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { Type } from "@sinclair/typebox";
 import type { Executor } from "../sandbox.js";
 import { DEFAULT_MAX_BYTES, formatSize, type TruncationResult, truncateHead, truncateTail } from "./truncate.js";

@@ -1,11 +1,27 @@
 import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createDbtTool, extractDbtJsonRows } from "../src/tools/dbt.js";
 
 async function tempDir(): Promise<string> {
 	return mkdtemp(join(tmpdir(), "fabee-dbt-test-"));
+}
+
+afterEach(() => {
+	vi.unstubAllEnvs();
+});
+
+function configureDbtEnv(projectDir: string, profilesDir = projectDir): void {
+	vi.stubEnv("BEE_PI_AGENT_DBT_COMMAND", "dbt");
+	vi.stubEnv("PI_AGENT_WORKER_DBT_COMMAND", "");
+	vi.stubEnv("BEE_PI_AGENT_DBT_PROJECT_DIR", projectDir);
+	vi.stubEnv("PI_AGENT_WORKER_DBT_PROJECT_DIR", "");
+	vi.stubEnv("BEE_PI_AGENT_DBT_PROFILES_DIR", profilesDir);
+	vi.stubEnv("PI_AGENT_WORKER_DBT_PROFILES_DIR", "");
+	vi.stubEnv("DBT_PROFILES_DIR", "");
+	vi.stubEnv("BEE_PI_AGENT_DBT_TARGET", "");
+	vi.stubEnv("PI_AGENT_WORKER_DBT_TARGET", "");
 }
 
 describe("dbt JSON extraction", () => {
@@ -17,6 +33,12 @@ describe("dbt JSON extraction", () => {
 		expect(extractDbtJsonRows('log before\n[{"id":1}]\nlog after')).toEqual([{ id: 1 }]);
 		expect(extractDbtJsonRows('log before\n{"rows":[{"id":2}]}\nlog after')).toEqual([{ id: 2 }]);
 		expect(extractDbtJsonRows('log before\n{"data":[{"id":3}]}\nlog after')).toEqual([{ id: 3 }]);
+	});
+
+	it("ignores ANSI color sequences in dbt logs before JSON", () => {
+		expect(extractDbtJsonRows('\u001b[0m12:00:00  Running with dbt=1.10.15\n{"show":[{"id":5}]}')).toEqual([
+			{ id: 5 },
+		]);
 	});
 
 	it("prefers the last valid show payload when multiple candidates exist", () => {
@@ -32,6 +54,58 @@ describe("dbt JSON extraction", () => {
 		expect(() => extractDbtJsonRows("dbt log only", "stderr warning only")).toThrow(
 			/Could not extract clean dbt JSON payload/,
 		);
+	});
+});
+
+describe("dbt command construction", () => {
+	it("places project and profiles flags after show subcommand", async () => {
+		const sessionDir = await tempDir();
+		const exec = vi.fn().mockResolvedValue({
+			stdout: '[{"id":1}]',
+			stderr: "",
+			code: 0,
+		});
+		configureDbtEnv(sessionDir);
+		const tool = createDbtTool({ exec, getWorkspacePath: (path) => path }, sessionDir, sessionDir, sessionDir);
+
+		await tool.execute("tool-call", {
+			label: "Show inline rows",
+			action: "show",
+			inlineSql: "select 1 as id;",
+			target: "prod",
+			output: "json",
+			limit: 10,
+		});
+
+		const command = exec.mock.calls[0][0];
+		expect(command).toBe(
+			`'dbt' show --project-dir '${sessionDir}' --profiles-dir '${sessionDir}' --target 'prod' --output 'json' --inline 'select 1 as id' --limit 10`,
+		);
+		expect(command).not.toMatch(/^'dbt' --project-dir .* show/);
+	});
+
+	it("places project and profiles flags after list subcommand with selectors and resource types", async () => {
+		const sessionDir = await tempDir();
+		const exec = vi.fn().mockResolvedValue({
+			stdout: "model.project.my_model",
+			stderr: "",
+			code: 0,
+		});
+		configureDbtEnv(sessionDir);
+		const tool = createDbtTool({ exec, getWorkspacePath: (path) => path }, sessionDir, sessionDir, sessionDir);
+
+		await tool.execute("tool-call", {
+			label: "List models",
+			action: "list",
+			select: "+my_model",
+			resourceTypes: ["model", "source"],
+		});
+
+		const command = exec.mock.calls[0][0];
+		expect(command).toBe(
+			`'dbt' list --project-dir '${sessionDir}' --profiles-dir '${sessionDir}' --select '+my_model' --resource-type 'model' --resource-type 'source'`,
+		);
+		expect(command).not.toMatch(/^'dbt' --project-dir .* list/);
 	});
 });
 

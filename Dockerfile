@@ -1,5 +1,8 @@
 # syntax=docker/dockerfile:1.6
-FROM node:22-alpine AS build
+# Pin Node and Alpine explicitly so tag rebuilds cannot silently move us to
+# another Alpine/Python line. Alpine 3.22 provides Python 3.12.x.
+ARG NODE_BASE_IMAGE=node:22.19.0-alpine3.22@sha256:d2166de198f26e17e5a442f537754dd616ab069c47cc57b889310a717e0abbf9
+FROM ${NODE_BASE_IMAGE} AS build
 
 RUN apk add --no-cache fontconfig ttf-dejavu
 
@@ -10,7 +13,7 @@ COPY . .
 RUN npm run build && npm prune --omit=dev
 RUN npm run smoke:chart
 
-FROM node:22-alpine
+FROM ${NODE_BASE_IMAGE}
 
 ARG OCI_SOURCE=https://github.com/fabianmewes-jm/Fabee-pi-agent
 LABEL org.opencontainers.image.source="${OCI_SOURCE}"
@@ -26,13 +29,13 @@ RUN apk add --no-cache \
     fontconfig \
     ttf-dejavu \
     tini \
-    python3 \
+    "python3~3.12" \
     py3-pip \
     make
 
+ARG UV_VERSION=0.11.21
 RUN python3 -m venv /opt/bootstrap-venv \
-    && /opt/bootstrap-venv/bin/pip install --no-cache-dir --upgrade pip setuptools wheel \
-    && /opt/bootstrap-venv/bin/pip install --no-cache-dir uv
+    && /opt/bootstrap-venv/bin/pip install --no-cache-dir "uv==${UV_VERSION}"
 
 RUN addgroup -g 10001 -S app && adduser -S -D -H -u 10001 -G app -h /home/app app
 

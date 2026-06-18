@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.21
+
+- fix dbt CLI argument ordering by placing subcommands before project/profile flags
+- strip ANSI terminal sequences before extracting `dbt show --output json` payloads
+
 ## 0.1.19
 
 - increase the default artifact inline limit to 5 MB and mark attached `.csv` files as `text/csv` for Slack uploads

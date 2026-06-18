@@ -205,6 +205,10 @@ function pickDbtJsonMatch(matches: DbtJsonMatch[]): DbtJsonMatch {
 	return [...matches].reverse().find((match) => match.hasShow) || matches[matches.length - 1];
 }
 
+function stripAnsiSequences(text: string): string {
+	return text.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "");
+}
+
 function scanJsonCandidates(text: string): string[] {
 	const candidates: string[] = [];
 	let start = -1;
@@ -259,17 +263,19 @@ function scanJsonCandidates(text: string): string[] {
 }
 
 export function extractDbtJsonRows(stdout: string, stderr = ""): Record<string, unknown>[] {
-	const direct = tryParseDbtJsonPayload(stdout);
+	const normalizedStdout = stripAnsiSequences(stdout);
+	const normalizedStderr = stripAnsiSequences(stderr);
+	const direct = tryParseDbtJsonPayload(normalizedStdout);
 	if (direct) return direct.rows;
 
-	const stdoutMatches = scanJsonCandidates(stdout)
+	const stdoutMatches = scanJsonCandidates(normalizedStdout)
 		.map((candidate) => tryParseDbtJsonPayload(candidate))
 		.filter((match): match is DbtJsonMatch => Boolean(match));
 	if (stdoutMatches.length > 0) {
 		return pickDbtJsonMatch(stdoutMatches).rows;
 	}
 
-	const combinedMatches = scanJsonCandidates(`${stdout}\n${stderr}`)
+	const combinedMatches = scanJsonCandidates(`${normalizedStdout}\n${normalizedStderr}`)
 		.map((candidate) => tryParseDbtJsonPayload(candidate))
 		.filter((match): match is DbtJsonMatch => Boolean(match));
 	if (combinedMatches.length > 0) {
@@ -353,7 +359,7 @@ function buildDbtCommand(args: {
 	state?: string;
 	favorState?: boolean;
 }): string {
-	const command: string[] = [shellEscape(args.dbtExecutable)];
+	const command: string[] = [shellEscape(args.dbtExecutable), args.action];
 
 	if (args.projectDir) {
 		command.push("--project-dir", shellEscape(args.projectDir));
@@ -361,8 +367,6 @@ function buildDbtCommand(args: {
 	if (args.profilesDir) {
 		command.push("--profiles-dir", shellEscape(args.profilesDir));
 	}
-
-	command.push(args.action);
 
 	if (args.target) {
 		command.push("--target", shellEscape(args.target));

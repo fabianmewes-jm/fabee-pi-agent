@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.22
+
+- pin the container base image by digest and constrain Alpine Python/uv versions to keep pod startup stable
+
 ## 0.1.21
 
 - fix dbt CLI argument ordering by placing subcommands before project/profile flags

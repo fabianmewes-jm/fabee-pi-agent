@@ -20,8 +20,8 @@ subject routing.
 ## What this package does not do
 
 - no direct NATS connection
-- no Slack transport or Slack formatting
-- no gateway responsibilities
+- no Slack transport or gateway responsibilities
+- no generic Slack ingress/response handling; individual tools may still return Slack-ready Markdown
 
 ## Design intent
 
@@ -88,6 +88,11 @@ Primary variables:
 - `BEE_PI_AGENT_MODEL_ID` optional model override
 - `BEE_PI_AGENT_THINKING_LEVEL` optional reasoning level: `off`, `minimal`, `low`, `medium`, `high`, or `xhigh`; default `off`
 - `BEE_PI_AGENT_TOOL_MODULES` optional comma-separated extra tool modules
+- `BEE_PI_AGENT_ENABLE_COMPANY_BRIEFING` optional `true`/`1` env gate for the baked-in `company_briefing` worker tool
+- `BEE_PI_AGENT_COMPANY_BRIEFING_SLACK_OWNER_MAP` optional JSON object mapping Slack user IDs to HubSpot owner IDs for `company_briefing`
+- `BEE_PI_AGENT_COMPANY_BRIEFING_SLACK_OWNER_MAP_FILE` optional file path containing the same JSON mapping
+- `BEE_PI_AGENT_COMPANY_BRIEFING_DBT_TARGET` optional dbt target for `company_briefing`, defaulting to `prod`
+- `BEE_PI_AGENT_COMPANY_BRIEFING_QUERY_TIMEOUT_SECONDS` optional BI query timeout for `company_briefing`, default `45`
 - `BEE_PI_AGENT_DBT_PROJECT_DIR` optional dbt project directory for the built-in `dbt` tool
 - `BEE_PI_AGENT_DBT_PROFILES_DIR` optional dbt profiles directory for the built-in `dbt` tool
 - `BEE_PI_AGENT_DBT_COMMAND` optional dbt executable path or command name for the built-in `dbt` tool
@@ -122,6 +127,32 @@ BEE_PI_AGENT_DBT_TARGET=dev
 ```
 
 If `BEE_PI_AGENT_DBT_COMMAND` is not set, the tool tries a local `.venv/bin/dbt` first and then falls back to `dbt` on `PATH`.
+
+## Built-in Company Briefing tool
+
+The image contains an optional `company_briefing` worker tool for JobMatch Company Briefings. It is not exposed by default. Enable it either with:
+
+```bash
+BEE_PI_AGENT_ENABLE_COMPANY_BRIEFING=true
+```
+
+or by loading the baked module explicitly:
+
+```bash
+BEE_PI_AGENT_TOOL_MODULES=./dist/tools/company-briefing.js
+```
+
+The tool contract is `companyId` plus `requesterSlackId`. It performs the Slack-ID-to-HubSpot-owner authorization check before reading briefing data, queries already-built Analytics/dbt models with the prod target by default, and returns Slack-ready Markdown plus structured non-raw signal details. Company Briefings should use this tool and should not be reconstructed through arbitrary dbt/BI queries in the agent prompt path.
+
+Required operational configuration:
+
+```bash
+BEE_PI_AGENT_DBT_PROJECT_DIR=/path/to/dbt-project
+BEE_PI_AGENT_DBT_PROFILES_DIR=/path/to/dbt-profiles-dir
+BEE_PI_AGENT_COMPANY_BRIEFING_SLACK_OWNER_MAP='{"U123":"987654"}'
+```
+
+The older `PI_AGENT_WORKER_*` variable names are accepted as fallbacks for the Company Briefing settings as well.
 
 ## Docker image
 

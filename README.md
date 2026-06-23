@@ -89,8 +89,6 @@ Primary variables:
 - `BEE_PI_AGENT_THINKING_LEVEL` optional reasoning level: `off`, `minimal`, `low`, `medium`, `high`, or `xhigh`; default `off`
 - `BEE_PI_AGENT_TOOL_MODULES` optional comma-separated extra tool modules
 - `BEE_PI_AGENT_ENABLE_COMPANY_BRIEFING` optional `true`/`1` env gate for the baked-in `company_briefing` worker tool
-- `BEE_PI_AGENT_COMPANY_BRIEFING_SLACK_OWNER_MAP` optional JSON object mapping Slack user IDs to HubSpot owner IDs for `company_briefing`
-- `BEE_PI_AGENT_COMPANY_BRIEFING_SLACK_OWNER_MAP_FILE` optional file path containing the same JSON mapping
 - `BEE_PI_AGENT_COMPANY_BRIEFING_DBT_TARGET` optional dbt target for `company_briefing`, defaulting to `prod`
 - `BEE_PI_AGENT_COMPANY_BRIEFING_QUERY_TIMEOUT_SECONDS` optional BI query timeout for `company_briefing`, default `45`
 - `BEE_PI_AGENT_DBT_PROJECT_DIR` optional dbt project directory for the built-in `dbt` tool
@@ -142,15 +140,16 @@ or by loading the baked module explicitly:
 BEE_PI_AGENT_TOOL_MODULES=./dist/tools/company-briefing.js
 ```
 
-The tool contract is `companyId` plus `requesterSlackId`. It performs the Slack-ID-to-HubSpot-owner authorization check before reading briefing data, queries already-built Analytics/dbt models with the prod target by default, and returns Slack-ready Markdown plus structured non-raw signal details. Company Briefings should use this tool and should not be reconstructed through arbitrary dbt/BI queries in the agent prompt path.
+The tool contract is `companyId` plus `requesterSlackId`. V1 keeps `requesterSlackId` for caller compatibility but does not perform an owner-authorization check. It queries already-built Analytics/dbt models with the prod target by default, and returns Slack-ready Markdown plus structured non-raw signal details. Company Briefings should use this tool and should not be reconstructed through arbitrary dbt/BI queries in the agent prompt path.
 
 Required operational configuration:
 
 ```bash
 BEE_PI_AGENT_DBT_PROJECT_DIR=/path/to/dbt-project
 BEE_PI_AGENT_DBT_PROFILES_DIR=/path/to/dbt-profiles-dir
-BEE_PI_AGENT_COMPANY_BRIEFING_SLACK_OWNER_MAP='{"U123":"987654"}'
 ```
+
+In JobMatch Kubernetes deployments, Analytics dbt credentials are provided by Flux infra (for example via `analytics-db-credentials`); this app chart does not create them.
 
 The older `PI_AGENT_WORKER_*` variable names are accepted as fallbacks for the Company Briefing settings as well.
 

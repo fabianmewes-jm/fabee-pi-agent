@@ -22,7 +22,7 @@ const companyBriefingSchema = Type.Object(
 			pattern: COMPANY_ID_PATTERN,
 		}),
 		requesterSlackId: Type.String({
-			description: "Slack user ID of the requesting Sales Rep. Used for the HubSpot Owner authorization check.",
+			description: "Slack user ID of the requester. Kept for the V1 Company Briefing caller contract.",
 			minLength: 1,
 		}),
 	},
@@ -31,12 +31,7 @@ const companyBriefingSchema = Type.Object(
 
 export type CompanyBriefingStatus = "OK" | "OK_WITH_WARNINGS" | "BLOCKED" | "FAILED";
 export type NoticeSeverity = "INFO" | "WARNING" | "BLOCKING";
-export type AffectedBlock =
-	| "AUTHORIZATION"
-	| "SALES_OPPORTUNITIES"
-	| "PLATFORM_SIGNALS"
-	| "CRM_SIGNALS"
-	| "SIGNAL_INTERPRETATION";
+export type AffectedBlock = "SALES_OPPORTUNITIES" | "PLATFORM_SIGNALS" | "CRM_SIGNALS" | "SIGNAL_INTERPRETATION";
 
 export interface NoticeItem {
 	severity: NoticeSeverity;
@@ -120,7 +115,6 @@ export interface CompanyContext {
 	companyId: string;
 	companyName: string;
 	hubspotCompanyId: string | null;
-	hubspotOwnerId: string | null;
 	lastReachedCallAt: string | null;
 	notices: NoticeItem[];
 }
@@ -144,11 +138,8 @@ export interface CompanyBriefingDataAccess {
 	): Promise<Record<string, unknown>[]>;
 }
 
-export type RequesterOwnerResolver = (requesterSlackId: string, signal?: AbortSignal) => Promise<string | undefined>;
-
 export interface CompanyBriefingServices {
 	dataAccess: CompanyBriefingDataAccess;
-	resolveRequesterHubSpotOwnerId: RequesterOwnerResolver;
 	now: () => Date;
 	requestIdFactory: () => string;
 }
@@ -159,7 +150,6 @@ export interface CreateCompanyBriefingToolArgs {
 	workingDir: string;
 	sessionDir: string;
 	dataAccess?: CompanyBriefingDataAccess;
-	resolveRequesterHubSpotOwnerId?: RequesterOwnerResolver;
 	now?: () => Date;
 	requestIdFactory?: () => string;
 }
@@ -518,7 +508,6 @@ function mapCompanyContextRows(rows: Record<string, unknown>[], requestedCompany
 	const row = rows[0];
 	const notices: NoticeItem[] = [];
 	const companyId = getStringValue(row, "companyId", "company_id") || requestedCompanyId;
-	const hubspotOwnerId = getStringValue(row, "hubspotOwnerId", "hubspot_owner_id");
 	const hubspotCompanyId = getStringValue(row, "hubspotCompanyId", "hubspot_company_id");
 	let companyName = getStringValue(row, "companyName", "company_name");
 	if (!companyName) {
@@ -539,7 +528,6 @@ function mapCompanyContextRows(rows: Record<string, unknown>[], requestedCompany
 			companyId,
 			companyName,
 			hubspotCompanyId,
-			hubspotOwnerId,
 			lastReachedCallAt: normalizeTimestamp(getFieldValue(row, "lastReachedCallAt", "last_reached_call_at")),
 			notices,
 		},
@@ -552,7 +540,6 @@ select
     company_id as "companyId",
     hubspot_company_id as "hubspotCompanyId",
     company_name as "companyName",
-    hubspot_owner_id as "hubspotOwnerId",
     briefing_window_started_at as "lastReachedCallAt"
 from {{ ref('90_hubspot__fct_pre_call_agent_brief') }}
 where company_id = ${sqlLiteral(companyId)}`;
@@ -980,9 +967,9 @@ function determineBriefingPeriod(
 	};
 }
 
-function createBlockedResponse(requestId: string, companyId: string, notice: NoticeItem): CompanyBriefingResponse {
+function createFailedResponse(requestId: string, companyId: string, notice: NoticeItem): CompanyBriefingResponse {
 	return {
-		status: "BLOCKED",
+		status: "FAILED",
 		requestId,
 		companyId,
 		briefing: null,
@@ -1001,62 +988,32 @@ export async function executeCompanyBriefing(
 	signal?: AbortSignal,
 ): Promise<CompanyBriefingResponse> {
 	const requestId = services.requestIdFactory();
-	const block = (code: string, message: string) =>
-		createBlockedResponse(requestId, input.companyId, buildNotice("BLOCKING", code, message, "AUTHORIZATION"));
+	const fail = (code: string, message: string) =>
+		createFailedResponse(requestId, input.companyId, buildNotice("BLOCKING", code, message, "CRM_SIGNALS"));
 	let companyLookup: CompanyContextLookup;
 	try {
 		companyLookup = await services.dataAccess.getCompanyContext(input.companyId, signal);
 	} catch {
-		return block(
-			"OWNER_CHECK_FAILED",
-			"Der Owner-Check konnte nicht durchgeführt werden; es wurde kein Company Briefing ausgegeben.",
+		return fail(
+			"COMPANY_CONTEXT_UNAVAILABLE",
+			"Der Company Kontext konnte nicht geladen werden; es wurde kein Company Briefing ausgegeben.",
 		);
 	}
 
 	if (companyLookup.status === "not_found") {
-		return block(
+		return fail(
 			"HUBSPOT_COMPANY_NOT_FOUND",
-			"Für diese companyId wurde keine eindeutige HubSpot Company gefunden; es wurde kein Company Briefing ausgegeben.",
+			"Für diese companyId wurde keine HubSpot Company gefunden; es wurde kein Company Briefing ausgegeben.",
 		);
 	}
 	if (companyLookup.status === "not_unique") {
-		return block(
+		return fail(
 			"HUBSPOT_COMPANY_NOT_UNIQUE",
 			"Für diese companyId wurden mehrere HubSpot Companies gefunden; es wurde kein Company Briefing ausgegeben.",
 		);
 	}
 
-	let requesterHubSpotOwnerId: string | undefined;
-	try {
-		requesterHubSpotOwnerId = await services.resolveRequesterHubSpotOwnerId(input.requesterSlackId, signal);
-	} catch {
-		return block(
-			"SLACK_OWNER_MAPPING_INVALID",
-			"Das Slack-ID-zu-HubSpot-Owner-ID-Mapping ist ungültig; es wurde kein Company Briefing ausgegeben.",
-		);
-	}
-
-	if (!requesterHubSpotOwnerId) {
-		return block(
-			"SLACK_OWNER_MAPPING_MISSING",
-			"Für die anfragende Slack ID ist kein HubSpot Owner Mapping konfiguriert; es wurde kein Company Briefing ausgegeben.",
-		);
-	}
-
 	const company = companyLookup.company;
-	if (!company.hubspotOwnerId) {
-		return block(
-			"HUBSPOT_OWNER_MISSING",
-			"Die HubSpot Company hat keinen aktuellen Owner; es wurde kein Company Briefing ausgegeben.",
-		);
-	}
-
-	if (company.hubspotOwnerId !== requesterHubSpotOwnerId) {
-		return block(
-			"OWNER_CHECK_FAILED",
-			"Du bist nicht als aktueller HubSpot Owner dieser Company berechtigt; es wurde kein Company Briefing ausgegeben.",
-		);
-	}
 
 	const periodTo = services.now();
 	const { period, notices: periodNotices } = determineBriefingPeriod(company, periodTo);
@@ -1091,50 +1048,11 @@ export async function executeCompanyBriefing(
 	};
 }
 
-function parseSlackOwnerMap(raw: string): Record<string, string> {
-	const parsed = JSON.parse(raw) as unknown;
-	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-		throw new Error("Slack owner map must be a JSON object");
-	}
-	const result: Record<string, string> = {};
-	for (const [key, value] of Object.entries(parsed)) {
-		if (!key.trim()) continue;
-		if (typeof value !== "string" && typeof value !== "number") {
-			throw new Error("Slack owner map values must be strings or numbers");
-		}
-		const normalizedValue = String(value).trim();
-		if (!normalizedValue) continue;
-		result[key.trim()] = normalizedValue;
-	}
-	return result;
-}
-
-export function createEnvRequesterOwnerResolver(): RequesterOwnerResolver {
-	let loadedMap: Record<string, string> | undefined;
-	return async (requesterSlackId: string) => {
-		if (!loadedMap) {
-			const filePath = readEnv(
-				"BEE_PI_AGENT_COMPANY_BRIEFING_SLACK_OWNER_MAP_FILE",
-				"PI_AGENT_WORKER_COMPANY_BRIEFING_SLACK_OWNER_MAP_FILE",
-			);
-			const raw = filePath
-				? await readFile(filePath, "utf-8")
-				: readEnv(
-						"BEE_PI_AGENT_COMPANY_BRIEFING_SLACK_OWNER_MAP",
-						"PI_AGENT_WORKER_COMPANY_BRIEFING_SLACK_OWNER_MAP",
-					);
-			loadedMap = raw ? parseSlackOwnerMap(raw) : {};
-		}
-		return loadedMap[requesterSlackId];
-	};
-}
-
 function createDefaultServices(args: CreateCompanyBriefingToolArgs): CompanyBriefingServices {
 	return {
 		dataAccess:
 			args.dataAccess ||
 			new DbtCompanyBriefingDataAccess(args.executor, args.workspaceRoot, args.workingDir, args.sessionDir),
-		resolveRequesterHubSpotOwnerId: args.resolveRequesterHubSpotOwnerId || createEnvRequesterOwnerResolver(),
 		now: args.now || (() => new Date()),
 		requestIdFactory: args.requestIdFactory || (() => randomUUID()),
 	};
@@ -1263,7 +1181,7 @@ export function createCompanyBriefingTool(
 		name: COMPANY_BRIEFING_TOOL_NAME,
 		label: "company_briefing",
 		description:
-			"Create an owner-authorized JobMatch Company Briefing from companyId and requesterSlackId. Use this tool for Company Briefings; do not reconstruct Company Briefings with arbitrary dbt/BI queries. Returns Slack-ready Markdown and structured, non-raw signal details.",
+			"Create a JobMatch Company Briefing from companyId and requesterSlackId. Use this tool for Company Briefings; do not reconstruct Company Briefings with arbitrary dbt/BI queries. Returns Slack-ready Markdown and structured, non-raw signal details.",
 		parameters: companyBriefingSchema,
 		execute: async (_toolCallId, params, signal) => {
 			const input = validateCompanyBriefingArgs(params);

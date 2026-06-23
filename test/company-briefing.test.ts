@@ -23,7 +23,6 @@ import type { WorkerRunRequest } from "../src/types.js";
 
 const COMPANY_ID = "34e014ed-1038-476a-b46a-5c61a0fd8c0b";
 const REQUESTER_SLACK_ID = "U123";
-const OWNER_ID = "987654";
 const NOW = new Date("2026-06-23T12:00:00.000Z");
 
 async function tempDir(): Promise<string> {
@@ -35,7 +34,6 @@ function companyContext(overrides: Partial<CompanyContext> = {}): CompanyContext
 		companyId: COMPANY_ID,
 		companyName: "Acme GmbH",
 		hubspotCompanyId: "hs-1",
-		hubspotOwnerId: OWNER_ID,
 		lastReachedCallAt: "2026-06-01T08:00:00.000Z",
 		notices: [],
 		...overrides,
@@ -103,7 +101,6 @@ function sampleRows(): Record<string, unknown>[] {
 function servicesFor(overrides: Parameters<typeof dataAccess>[0] = {}) {
 	return {
 		dataAccess: dataAccess(overrides),
-		resolveRequesterHubSpotOwnerId: vi.fn(async () => OWNER_ID),
 		now: () => NOW,
 		requestIdFactory: () => "request-1",
 	};
@@ -229,7 +226,7 @@ describe("JOBOFFER_ACTIVITY_OVERVIEW query and mapping", () => {
 });
 
 describe("company_briefing execution", () => {
-	it("builds an owner-authorized briefing with joboffer activity and stale-inventory warning", async () => {
+	it("builds a briefing with joboffer activity and stale-inventory warning", async () => {
 		const response = await executeCompanyBriefing(
 			{ companyId: COMPANY_ID, requesterSlackId: REQUESTER_SLACK_ID },
 			servicesFor({ freshness: { maxActiveDate: "2026-06-22" }, rows: sampleRows() }),
@@ -272,21 +269,14 @@ describe("company_briefing execution", () => {
 		expect(response.markdown).toContain("Keine Joboffers waren in der Briefing Period active");
 	});
 
-	it("blocks the entire briefing on owner-check failure", async () => {
-		const services = servicesFor({ rows: sampleRows() });
-		services.resolveRequesterHubSpotOwnerId = vi.fn(async () => "other-owner");
-
+	it("does not require Slack-to-HubSpot owner mapping in V1", async () => {
 		const response = await executeCompanyBriefing(
 			{ companyId: COMPANY_ID, requesterSlackId: REQUESTER_SLACK_ID },
-			services,
+			servicesFor({ rows: sampleRows() }),
 		);
 
-		expect(response.status).toBe("BLOCKED");
-		expect(response.briefing).toBeNull();
-		expect(response.markdown).toBeNull();
-		expect(response.notices).toEqual([
-			expect.objectContaining({ severity: "BLOCKING", code: "OWNER_CHECK_FAILED", affectedBlock: "AUTHORIZATION" }),
-		]);
+		expect(response.status).toBe("OK");
+		expect(response.markdown).toContain("# Company Briefing: Acme GmbH");
 	});
 
 	it("tool output returns Slack-ready Markdown and structured details without BI raw records", async () => {
@@ -297,7 +287,6 @@ describe("company_briefing execution", () => {
 			workingDir: sessionDir,
 			sessionDir,
 			dataAccess: dataAccess({ rows: sampleRows() }),
-			resolveRequesterHubSpotOwnerId: vi.fn(async () => OWNER_ID),
 			now: () => NOW,
 			requestIdFactory: () => "request-1",
 		});

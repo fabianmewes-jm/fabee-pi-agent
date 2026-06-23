@@ -4,6 +4,7 @@ import type { WorkerRunRequest } from "../types.js";
 import { type ArtifactHandler, createAttachTool } from "./attach.js";
 import { createBashTool } from "./bash.js";
 import { createChartTool } from "./chart.js";
+import { createCompanyBriefingTool, isCompanyBriefingEnvEnabled } from "./company-briefing.js";
 import { createDbtTool } from "./dbt.js";
 import { createEditTool } from "./edit.js";
 import { loadWorkerToolExtensions } from "./extensions.js";
@@ -21,7 +22,7 @@ export interface CreateWorkerToolsArgs {
 }
 
 export async function createWorkerTools(args: CreateWorkerToolsArgs): Promise<AgentTool<any>[]> {
-	const builtinTools = [
+	const builtinTools: AgentTool<any>[] = [
 		createReadTool(args.executor),
 		createBashTool(args.executor),
 		createEditTool(args.executor),
@@ -30,6 +31,17 @@ export async function createWorkerTools(args: CreateWorkerToolsArgs): Promise<Ag
 		createDbtTool(args.executor, args.workspaceRoot, args.workingDir, args.sessionDir),
 		createChartTool(args.sessionDir),
 	];
+
+	if (isCompanyBriefingEnvEnabled()) {
+		builtinTools.push(
+			createCompanyBriefingTool({
+				executor: args.executor,
+				workspaceRoot: args.workspaceRoot,
+				workingDir: args.workingDir,
+				sessionDir: args.sessionDir,
+			}),
+		);
+	}
 
 	const extensionTools = await loadWorkerToolExtensions({
 		executor: args.executor,

@@ -212,6 +212,7 @@ function buildSystemPrompt(
 - run id: ${request.runId}
 - session id: ${request.sessionId}
 - requested by: ${requestedBy}
+- requester user id: ${request.actor.userId}
 - working directory: ${currentDir}
 - workspace root: ${visibleWorkspacePath}
 

@@ -1,0 +1,1213 @@
+import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import type { AgentTool } from "@earendil-works/pi-agent-core";
+import { Type } from "@sinclair/typebox";
+import type { Executor } from "../sandbox.js";
+import { createDbtTool } from "./dbt.js";
+import type { WorkerToolExtensionContext } from "./extensions.js";
+
+export const COMPANY_BRIEFING_TOOL_NAME = "company_briefing";
+export const JOBOFFER_ACTIVITY_OVERVIEW_TYPE = "JOBOFFER_ACTIVITY_OVERVIEW";
+
+const COMPANY_ID_PATTERN = "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$";
+const FALLBACK_PERIOD_DAYS = 60;
+const DEFAULT_QUERY_TIMEOUT_SECONDS = 45;
+const DEFAULT_QUERY_LIMIT = 1000;
+
+const companyBriefingSchema = Type.Object(
+	{
+		label: Type.String({ description: "Brief description of the Company Briefing request (shown to user)" }),
+		companyId: Type.String({
+			description: "JobMatch Company UUID. Company Briefings must be requested by companyId, not by name.",
+			pattern: COMPANY_ID_PATTERN,
+		}),
+		requesterSlackId: Type.String({
+			description: "Slack user ID of the requester. Kept for the V1 Company Briefing caller contract.",
+			minLength: 1,
+		}),
+	},
+	{ additionalProperties: false },
+);
+
+export type CompanyBriefingStatus = "OK" | "OK_WITH_WARNINGS" | "BLOCKED" | "FAILED";
+export type NoticeSeverity = "INFO" | "WARNING" | "BLOCKING";
+export type AffectedBlock = "SALES_OPPORTUNITIES" | "PLATFORM_SIGNALS" | "CRM_SIGNALS" | "SIGNAL_INTERPRETATION";
+
+export interface NoticeItem {
+	severity: NoticeSeverity;
+	code: string;
+	message: string;
+	affectedBlock: AffectedBlock;
+}
+
+export interface BriefingPeriod {
+	from: string;
+	to: string;
+	basis: "LAST_REACHED_CALL" | "FALLBACK_60_DAYS";
+	lastReachedCallAt: string | null;
+}
+
+export interface SignalInterpretation {
+	summary: Array<{ text: string; evidenceSignalIds: string[] }>;
+	themes: Array<{ label: string; summary: string; evidenceSignalIds: string[] }>;
+}
+
+export interface PlatformSignal<TData = unknown> {
+	id: string;
+	type: string;
+	title: string;
+	facts: string[];
+	data: TData;
+}
+
+export interface ProductAssignment {
+	product: string;
+	from: string;
+	to: string;
+}
+
+export interface JobofferActivityOverviewItem {
+	jobofferId: string;
+	title: string;
+	currentProduct: string | null;
+	currentProductSince: string | null;
+	previousProductAssignments: ProductAssignment[];
+	currentlyActive: boolean;
+	newBewerbungenCount: number;
+	newHiresCount: number;
+	isExpiring: boolean;
+	bookingEndsAt: string | null;
+}
+
+export interface JobofferActivityOverviewData {
+	joboffers: JobofferActivityOverviewItem[];
+}
+
+export interface CrmSignal<TData = unknown> {
+	id: string;
+	type: string;
+	title: string;
+	facts: string[];
+	data?: TData;
+}
+
+export interface CompanyBriefing {
+	companyId: string;
+	companyName: string;
+	briefingPeriod: BriefingPeriod;
+	signalInterpretation: SignalInterpretation;
+	salesOpportunities: unknown[];
+	platformSignals: PlatformSignal[];
+	crmSignals: CrmSignal[];
+	notices: NoticeItem[];
+}
+
+export interface CompanyBriefingResponse {
+	status: CompanyBriefingStatus;
+	requestId: string;
+	companyId: string;
+	briefing: CompanyBriefing | null;
+	markdown: string | null;
+	notices: NoticeItem[];
+}
+
+export interface CompanyContext {
+	companyId: string;
+	companyName: string;
+	hubspotCompanyId: string | null;
+	lastReachedCallAt: string | null;
+	notices: NoticeItem[];
+}
+
+export type CompanyContextLookup =
+	| { status: "found"; company: CompanyContext }
+	| { status: "not_found" }
+	| { status: "not_unique" };
+
+export interface BookingInventoryFreshness {
+	maxActiveDate: string | null;
+}
+
+export interface CompanyBriefingDataAccess {
+	getCompanyContext(companyId: string, signal?: AbortSignal): Promise<CompanyContextLookup>;
+	getBookingInventoryFreshness(signal?: AbortSignal): Promise<BookingInventoryFreshness>;
+	getJobofferActivityRows(
+		companyId: string,
+		briefingPeriod: BriefingPeriod,
+		signal?: AbortSignal,
+	): Promise<Record<string, unknown>[]>;
+}
+
+export interface CompanyBriefingServices {
+	dataAccess: CompanyBriefingDataAccess;
+	now: () => Date;
+	requestIdFactory: () => string;
+}
+
+export interface CreateCompanyBriefingToolArgs {
+	executor: Executor;
+	workspaceRoot: string;
+	workingDir: string;
+	sessionDir: string;
+	dataAccess?: CompanyBriefingDataAccess;
+	now?: () => Date;
+	requestIdFactory?: () => string;
+}
+
+export interface CompanyBriefingToolInput {
+	companyId: string;
+	requesterSlackId: string;
+}
+
+function readEnv(...names: string[]): string | undefined {
+	for (const name of names) {
+		const value = process.env[name];
+		if (value) return value;
+	}
+	return undefined;
+}
+
+function isTruthyEnv(value: string | undefined): boolean {
+	if (!value) return false;
+	return ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
+}
+
+export function isCompanyBriefingEnvEnabled(): boolean {
+	return isTruthyEnv(readEnv("BEE_PI_AGENT_ENABLE_COMPANY_BRIEFING", "PI_AGENT_WORKER_ENABLE_COMPANY_BRIEFING"));
+}
+
+function getCompanyBriefingDbtTarget(): string {
+	return (
+		readEnv(
+			"BEE_PI_AGENT_COMPANY_BRIEFING_DBT_TARGET",
+			"PI_AGENT_WORKER_COMPANY_BRIEFING_DBT_TARGET",
+			"BEE_PI_AGENT_DBT_TARGET",
+			"PI_AGENT_WORKER_DBT_TARGET",
+		) || "prod"
+	);
+}
+
+function getCompanyBriefingQueryTimeoutSeconds(): number {
+	const raw = readEnv(
+		"BEE_PI_AGENT_COMPANY_BRIEFING_QUERY_TIMEOUT_SECONDS",
+		"PI_AGENT_WORKER_COMPANY_BRIEFING_QUERY_TIMEOUT_SECONDS",
+	);
+	if (!raw) return DEFAULT_QUERY_TIMEOUT_SECONDS;
+	const parsed = Number.parseInt(raw, 10);
+	return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_QUERY_TIMEOUT_SECONDS;
+}
+
+function sqlLiteral(value: string): string {
+	return `'${value.replace(/'/g, "''")}'`;
+}
+
+function getStringValue(row: Record<string, unknown>, ...keys: string[]): string | null {
+	for (const key of keys) {
+		const value = row[key];
+		if (value === null || value === undefined) continue;
+		const text = String(value).trim();
+		if (text.length > 0) return text;
+	}
+	return null;
+}
+
+function getFieldValue(row: Record<string, unknown>, ...keys: string[]): unknown {
+	for (const key of keys) {
+		if (Object.hasOwn(row, key)) return row[key];
+	}
+	return undefined;
+}
+
+function normalizeTimestamp(value: unknown): string | null {
+	if (value === null || value === undefined) return null;
+	const text = String(value).trim();
+	if (!text) return null;
+	const normalized = text.includes("T") ? text : text.replace(" ", "T");
+	const date = new Date(normalized);
+	if (Number.isNaN(date.getTime())) return null;
+	return date.toISOString();
+}
+
+function normalizeRequiredTimestamp(
+	value: unknown,
+	fieldName: string,
+	jobofferId: string,
+	notices: NoticeItem[],
+): string | null {
+	const normalized = normalizeTimestamp(value);
+	if (!normalized) {
+		notices.push(
+			platformWarning(
+				"UNEXPECTED_NULL_OR_INVALID_JOBOFFER_FIELD",
+				`Joboffer ${jobofferId} hat kein gültiges ${fieldName}; der betroffene Product Assignment Eintrag wurde ausgelassen.`,
+			),
+		);
+		return null;
+	}
+	return normalized;
+}
+
+function normalizeNullableTimestampWithNotice(
+	value: unknown,
+	fieldName: string,
+	jobofferId: string,
+	notices: NoticeItem[],
+): string | null {
+	if (value === null || value === undefined || String(value).trim() === "") return null;
+	const normalized = normalizeTimestamp(value);
+	if (!normalized) {
+		notices.push(
+			platformWarning(
+				"UNEXPECTED_INVALID_JOBOFFER_TIMESTAMP",
+				`Joboffer ${jobofferId} enthält ein ungültiges ${fieldName}; das Feld wurde auf null gesetzt.`,
+			),
+		);
+	}
+	return normalized;
+}
+
+function normalizeCount(value: unknown, fieldName: string, jobofferId: string, notices: NoticeItem[]): number {
+	if (value === null || value === undefined || value === "") {
+		notices.push(
+			platformWarning(
+				"UNEXPECTED_NULL_JOBOFFER_COUNT",
+				`Joboffer ${jobofferId} enthält keinen Wert für ${fieldName}; der Count wurde auf 0 gesetzt.`,
+			),
+		);
+		return 0;
+	}
+	const numberValue = typeof value === "number" ? value : Number.parseInt(String(value), 10);
+	if (!Number.isFinite(numberValue) || numberValue < 0) {
+		notices.push(
+			platformWarning(
+				"UNEXPECTED_INVALID_JOBOFFER_COUNT",
+				`Joboffer ${jobofferId} enthält einen ungültigen Wert für ${fieldName}; der Count wurde auf 0 gesetzt.`,
+			),
+		);
+		return 0;
+	}
+	return Math.trunc(numberValue);
+}
+
+function normalizeBoolean(value: unknown, fieldName: string, jobofferId: string, notices: NoticeItem[]): boolean {
+	if (typeof value === "boolean") return value;
+	if (typeof value === "string") {
+		const normalized = value.trim().toLowerCase();
+		if (["true", "t", "1", "yes"].includes(normalized)) return true;
+		if (["false", "f", "0", "no"].includes(normalized)) return false;
+	}
+	if (typeof value === "number") {
+		if (value === 1) return true;
+		if (value === 0) return false;
+	}
+	notices.push(
+		platformWarning(
+			"UNEXPECTED_INVALID_JOBOFFER_BOOLEAN",
+			`Joboffer ${jobofferId} enthält keinen gültigen Boolean für ${fieldName}; der Wert wurde auf false gesetzt.`,
+		),
+	);
+	return false;
+}
+
+function parseJsonArray(value: unknown): unknown[] {
+	if (Array.isArray(value)) return value;
+	if (typeof value !== "string") return [];
+	try {
+		const parsed = JSON.parse(value) as unknown;
+		return Array.isArray(parsed) ? parsed : [];
+	} catch {
+		return [];
+	}
+}
+
+function normalizePreviousProductAssignments(
+	value: unknown,
+	jobofferId: string,
+	notices: NoticeItem[],
+): ProductAssignment[] {
+	const values = parseJsonArray(value);
+	const assignments: ProductAssignment[] = [];
+	for (const item of values) {
+		if (!item || typeof item !== "object" || Array.isArray(item)) {
+			notices.push(
+				platformWarning(
+					"UNEXPECTED_INVALID_PRODUCT_ASSIGNMENT",
+					`Joboffer ${jobofferId} enthält einen ungültigen Product Assignment Eintrag; der Eintrag wurde ausgelassen.`,
+				),
+			);
+			continue;
+		}
+		const row = item as Record<string, unknown>;
+		let product = getStringValue(row, "product");
+		if (!product) {
+			product = "UNKNOWN_PRODUCT";
+			notices.push(
+				platformWarning(
+					"UNEXPECTED_NULL_PRODUCT_ASSIGNMENT_PRODUCT",
+					`Joboffer ${jobofferId} enthält einen Product Assignment Eintrag ohne Product; UNKNOWN_PRODUCT wurde gesetzt.`,
+				),
+			);
+		}
+		const from = normalizeRequiredTimestamp(
+			getFieldValue(row, "from"),
+			"previousProductAssignments[].from",
+			jobofferId,
+			notices,
+		);
+		const to = normalizeRequiredTimestamp(
+			getFieldValue(row, "to"),
+			"previousProductAssignments[].to",
+			jobofferId,
+			notices,
+		);
+		if (!from || !to) continue;
+		assignments.push({ product, from, to });
+	}
+	return assignments;
+}
+
+export function validateCompanyBriefingArgs(value: unknown): CompanyBriefingToolInput {
+	if (!value || typeof value !== "object") {
+		throw new Error("company_briefing arguments must be an object");
+	}
+	const candidate = value as Record<string, unknown>;
+	const companyId = typeof candidate.companyId === "string" ? candidate.companyId.trim() : "";
+	const requesterSlackId = typeof candidate.requesterSlackId === "string" ? candidate.requesterSlackId.trim() : "";
+	if (!new RegExp(COMPANY_ID_PATTERN).test(companyId)) {
+		throw new Error("company_briefing.companyId must be a JobMatch Company UUID");
+	}
+	if (!requesterSlackId) {
+		throw new Error("company_briefing.requesterSlackId is required");
+	}
+	return { companyId: companyId.toLowerCase(), requesterSlackId };
+}
+
+export function mapJobofferActivityRows(rows: Record<string, unknown>[]): {
+	joboffers: JobofferActivityOverviewItem[];
+	notices: NoticeItem[];
+} {
+	const notices: NoticeItem[] = [];
+	const joboffers: JobofferActivityOverviewItem[] = [];
+
+	for (const row of rows) {
+		const jobofferId = getStringValue(row, "jobofferId", "joboffer_id");
+		if (!jobofferId) {
+			notices.push(
+				platformWarning(
+					"UNEXPECTED_NULL_JOBOFFER_ID",
+					"Ein Joboffer Activity Overview Eintrag ohne jobofferId wurde ausgelassen.",
+				),
+			);
+			continue;
+		}
+
+		let title = getStringValue(row, "title");
+		if (!title) {
+			title = jobofferId;
+			notices.push(
+				platformWarning(
+					"JOBOFFER_TITLE_FALLBACK_APPLIED",
+					`Joboffer ${jobofferId} hat keinen Titel; die jobofferId wurde als Titel gesetzt.`,
+				),
+			);
+		}
+
+		joboffers.push({
+			jobofferId,
+			title,
+			currentProduct: getStringValue(row, "currentProduct", "current_product"),
+			currentProductSince: normalizeNullableTimestampWithNotice(
+				getFieldValue(row, "currentProductSince", "current_product_since"),
+				"currentProductSince",
+				jobofferId,
+				notices,
+			),
+			previousProductAssignments: normalizePreviousProductAssignments(
+				getFieldValue(row, "previousProductAssignments", "previous_product_assignments"),
+				jobofferId,
+				notices,
+			),
+			currentlyActive: normalizeBoolean(
+				getFieldValue(row, "currentlyActive", "currently_active"),
+				"currentlyActive",
+				jobofferId,
+				notices,
+			),
+			newBewerbungenCount: normalizeCount(
+				getFieldValue(row, "newBewerbungenCount", "new_bewerbungen_count"),
+				"newBewerbungenCount",
+				jobofferId,
+				notices,
+			),
+			newHiresCount: normalizeCount(
+				getFieldValue(row, "newHiresCount", "new_hires_count"),
+				"newHiresCount",
+				jobofferId,
+				notices,
+			),
+			isExpiring: normalizeBoolean(
+				getFieldValue(row, "isExpiring", "is_expiring"),
+				"isExpiring",
+				jobofferId,
+				notices,
+			),
+			bookingEndsAt: normalizeNullableTimestampWithNotice(
+				getFieldValue(row, "bookingEndsAt", "booking_ends_at"),
+				"bookingEndsAt",
+				jobofferId,
+				notices,
+			),
+		});
+	}
+
+	return { joboffers, notices };
+}
+
+export function createJobofferActivityOverviewSignal(
+	joboffers: JobofferActivityOverviewItem[],
+): PlatformSignal<JobofferActivityOverviewData> {
+	const newBewerbungen = joboffers.reduce((sum, joboffer) => sum + joboffer.newBewerbungenCount, 0);
+	const newHires = joboffers.reduce((sum, joboffer) => sum + joboffer.newHiresCount, 0);
+	const expiring = joboffers.filter((joboffer) => joboffer.isExpiring).length;
+	const facts = [
+		`${joboffers.length} Joboffers waren in der Briefing Period active.`,
+		`${newBewerbungen} New Bewerbungen und ${newHires} New Hires in der Briefing Period.`,
+	];
+	if (expiring > 0) {
+		facts.push(`${expiring} Expiring Joboffers enden innerhalb der nächsten 7 Tage.`);
+	}
+	if (joboffers.length === 0) {
+		facts.push("Keine Joboffers waren in der Briefing Period active.");
+	}
+
+	return {
+		id: "platform.jobofferActivityOverview",
+		type: JOBOFFER_ACTIVITY_OVERVIEW_TYPE,
+		title: "Joboffer Bewerbungs-/Hire-Übersicht",
+		facts,
+		data: { joboffers },
+	};
+}
+
+function buildNotice(
+	severity: NoticeSeverity,
+	code: string,
+	message: string,
+	affectedBlock: AffectedBlock,
+): NoticeItem {
+	return { severity, code, message, affectedBlock };
+}
+
+function platformWarning(code: string, message: string): NoticeItem {
+	return buildNotice("WARNING", code, message, "PLATFORM_SIGNALS");
+}
+
+function mapCompanyContextRows(rows: Record<string, unknown>[], requestedCompanyId: string): CompanyContextLookup {
+	if (rows.length === 0) return { status: "not_found" };
+	if (rows.length > 1) return { status: "not_unique" };
+	const row = rows[0];
+	const notices: NoticeItem[] = [];
+	const companyId = getStringValue(row, "companyId", "company_id") || requestedCompanyId;
+	const hubspotCompanyId = getStringValue(row, "hubspotCompanyId", "hubspot_company_id");
+	let companyName = getStringValue(row, "companyName", "company_name");
+	if (!companyName) {
+		companyName = companyId;
+		notices.push(
+			buildNotice(
+				"WARNING",
+				"COMPANY_NAME_FALLBACK_APPLIED",
+				"Die Company hatte keinen HubSpot Company Name; die companyId wurde als Name gesetzt.",
+				"CRM_SIGNALS",
+			),
+		);
+	}
+
+	return {
+		status: "found",
+		company: {
+			companyId,
+			companyName,
+			hubspotCompanyId,
+			lastReachedCallAt: normalizeTimestamp(getFieldValue(row, "lastReachedCallAt", "last_reached_call_at")),
+			notices,
+		},
+	};
+}
+
+export function buildCompanyContextSql(companyId: string): string {
+	return `
+select
+    company_id as "companyId",
+    hubspot_company_id as "hubspotCompanyId",
+    company_name as "companyName",
+    briefing_window_started_at as "lastReachedCallAt"
+from {{ ref('90_hubspot__fct_pre_call_agent_brief') }}
+where company_id = ${sqlLiteral(companyId)}`;
+}
+
+export function buildBookingInventoryFreshnessSql(): string {
+	return `
+select
+    max(active_date)::text as "maxActiveDate"
+from {{ ref('90_bookings__fct_active_booking_inventory_daily') }}`;
+}
+
+export function buildJobofferActivityOverviewSql(companyId: string, briefingPeriod: BriefingPeriod): string {
+	return `
+with params as (
+    select
+        ${sqlLiteral(companyId)}::text as company_id,
+        ${sqlLiteral(briefingPeriod.from)}::timestamptz as period_from,
+        ${sqlLiteral(briefingPeriod.to)}::timestamptz as period_to
+),
+
+inventory_in_period as (
+    select
+        inv.joboffer_id,
+        inv.bc_id,
+        inv.active_date,
+        inv.active_from,
+        inv.active_until,
+        inv.booking_cancel_at,
+        inv.product,
+        inv.job_name_internal,
+        inv.job_name_external
+    from {{ ref('90_bookings__fct_active_booking_inventory_daily') }} inv
+    inner join params p
+        on inv.bc_id = p.company_id
+    where inv.active_date >= p.period_from::date
+      and inv.active_date <= (p.period_to - interval '1 microsecond')::date
+),
+
+base_joboffers as (
+    select distinct
+        joboffer_id
+    from inventory_in_period
+),
+
+latest_period_inventory as (
+    select
+        x.*
+    from (
+        select
+            iip.*,
+            row_number() over (
+                partition by iip.joboffer_id
+                order by
+                    iip.active_date desc,
+                    iip.active_from desc nulls last,
+                    iip.booking_cancel_at desc nulls last
+            ) as rn
+        from inventory_in_period iip
+    ) x
+    where x.rn = 1
+),
+
+current_inventory as (
+    select
+        inv.joboffer_id,
+        inv.bc_id,
+        inv.booking_cancel_at,
+        inv.product,
+        inv.active_from,
+        inv.active_until,
+        inv.job_name_internal,
+        inv.job_name_external
+    from {{ ref('90_bookings__fct_active_booking_inventory_daily') }} inv
+    inner join params p
+        on inv.bc_id = p.company_id
+    where inv.active_date = p.period_to::date
+      and inv.active_from <= p.period_to
+      and coalesce(inv.active_until, timestamp '9999-12-31') > p.period_to
+),
+
+product_assignment_segments as (
+    select distinct
+        iip.joboffer_id,
+        iip.product,
+        greatest(iip.active_from, p.period_from) as assignment_from,
+        least(coalesce(iip.active_until, p.period_to), p.period_to) as assignment_to
+    from inventory_in_period iip
+    cross join params p
+),
+
+product_assignment_ordered as (
+    select
+        product_assignment_segments.*,
+        lag(product) over (
+            partition by joboffer_id
+            order by assignment_from, assignment_to, product
+        ) as previous_product,
+        lag(assignment_to) over (
+            partition by joboffer_id
+            order by assignment_from, assignment_to, product
+        ) as previous_assignment_to
+    from product_assignment_segments
+),
+
+product_assignment_groups as (
+    select
+        product_assignment_ordered.*,
+        sum(
+            case
+                when previous_product = product
+                 and previous_assignment_to >= assignment_from
+                    then 0
+                else 1
+            end
+        ) over (
+            partition by joboffer_id
+            order by assignment_from, assignment_to, product
+            rows unbounded preceding
+        ) as assignment_group
+    from product_assignment_ordered
+),
+
+product_assignment_merged as (
+    select
+        joboffer_id,
+        product,
+        min(assignment_from) as assignment_from,
+        max(assignment_to) as assignment_to
+    from product_assignment_groups
+    group by joboffer_id, product, assignment_group
+),
+
+previous_product_assignments as (
+    select
+        pam.joboffer_id,
+        jsonb_agg(
+            jsonb_build_object(
+                'product', pam.product,
+                'from', pam.assignment_from,
+                'to', pam.assignment_to
+            )
+            order by pam.assignment_from, pam.assignment_to, pam.product
+        ) as previous_product_assignments_json
+    from product_assignment_merged pam
+    cross join params p
+    left join current_inventory ci
+        on ci.joboffer_id = pam.joboffer_id
+       and ci.product = pam.product
+       and pam.assignment_to = p.period_to
+    where ci.joboffer_id is null
+      and pam.assignment_to <= p.period_to
+    group by 1
+),
+
+applications_in_period as (
+    select
+        app.joboffer_id,
+        count(*) as new_bewerbungen_count
+    from {{ ref('40_matching__applications_core_enriched') }} app
+    inner join params p
+        on app.bc_id = p.company_id
+    inner join base_joboffers b
+        on b.joboffer_id = app.joboffer_id
+    where app.applied_at >= p.period_from
+      and app.applied_at < p.period_to
+    group by 1
+),
+
+hires_in_period as (
+    select
+        app.joboffer_id,
+        count(*) as new_hires_count
+    from {{ ref('40_matching__applications_core_enriched') }} app
+    inner join params p
+        on app.bc_id = p.company_id
+    inner join base_joboffers b
+        on b.joboffer_id = app.joboffer_id
+    where app.current_match_status = 'HIRED'
+      and app.current_match_status_created_at >= p.period_from
+      and app.current_match_status_created_at < p.period_to
+    group by 1
+),
+
+final as (
+    select
+        b.joboffer_id as "jobofferId",
+        coalesce(
+            ci.job_name_internal,
+            lpi.job_name_internal,
+            ci.job_name_external,
+            lpi.job_name_external,
+            b.joboffer_id
+        ) as title,
+        ci.product as "currentProduct",
+        ci.active_from as "currentProductSince",
+        coalesce(ppa.previous_product_assignments_json, '[]'::jsonb) as "previousProductAssignments",
+        (ci.joboffer_id is not null) as "currentlyActive",
+        coalesce(aip.new_bewerbungen_count, 0) as "newBewerbungenCount",
+        coalesce(hip.new_hires_count, 0) as "newHiresCount",
+        (
+            ci.joboffer_id is not null
+            and ci.booking_cancel_at is not null
+            and ci.booking_cancel_at >= p.period_to
+            and ci.booking_cancel_at < p.period_to + interval '7 days'
+        ) as "isExpiring",
+        coalesce(ci.booking_cancel_at, lpi.booking_cancel_at) as "bookingEndsAt"
+    from base_joboffers b
+    cross join params p
+    left join latest_period_inventory lpi
+        on lpi.joboffer_id = b.joboffer_id
+    left join current_inventory ci
+        on ci.joboffer_id = b.joboffer_id
+    left join previous_product_assignments ppa
+        on ppa.joboffer_id = b.joboffer_id
+    left join applications_in_period aip
+        on aip.joboffer_id = b.joboffer_id
+    left join hires_in_period hip
+        on hip.joboffer_id = b.joboffer_id
+)
+
+select *
+from final
+order by
+    case
+        when "isExpiring" then 1
+        when "newHiresCount" > 0 then 2
+        when "newBewerbungenCount" > 0 then 3
+        when "currentlyActive" then 4
+        else 5
+    end,
+    "newHiresCount" desc,
+    "newBewerbungenCount" desc,
+    "bookingEndsAt" asc nulls last,
+    title asc,
+    "jobofferId" asc`;
+}
+
+class DbtCompanyBriefingDataAccess implements CompanyBriefingDataAccess {
+	constructor(
+		private readonly executor: Executor,
+		private readonly workspaceRoot: string,
+		private readonly workingDir: string,
+		private readonly sessionDir: string,
+	) {}
+
+	private async query(label: string, inlineSql: string, signal?: AbortSignal): Promise<Record<string, unknown>[]> {
+		const dbtTool = createDbtTool(this.executor, this.workspaceRoot, this.workingDir, this.sessionDir);
+		const result = await dbtTool.execute(
+			`company-briefing-${randomUUID()}`,
+			{
+				label,
+				action: "show",
+				inlineSql,
+				target: getCompanyBriefingDbtTarget(),
+				output: "json",
+				limit: DEFAULT_QUERY_LIMIT,
+				timeout: getCompanyBriefingQueryTimeoutSeconds(),
+			},
+			signal,
+		);
+		const jsonOutputPath = (result.details as { jsonOutputPath?: unknown } | undefined)?.jsonOutputPath;
+		if (typeof jsonOutputPath !== "string" || jsonOutputPath.length === 0) {
+			throw new Error("dbt show did not produce a JSON output path");
+		}
+		const rows = (JSON.parse(await readFile(jsonOutputPath, "utf-8")) as { show?: unknown[] } | null)?.show;
+		if (!Array.isArray(rows)) throw new Error("dbt JSON output did not contain a show array");
+		if (!rows.every((row) => row && typeof row === "object" && !Array.isArray(row))) {
+			throw new Error("dbt JSON output rows must be objects");
+		}
+		return rows as Record<string, unknown>[];
+	}
+
+	async getCompanyContext(companyId: string, signal?: AbortSignal): Promise<CompanyContextLookup> {
+		const rows = await this.query(
+			"Load Company Briefing authorization context",
+			buildCompanyContextSql(companyId),
+			signal,
+		);
+		return mapCompanyContextRows(rows, companyId);
+	}
+
+	async getBookingInventoryFreshness(signal?: AbortSignal): Promise<BookingInventoryFreshness> {
+		const rows = await this.query(
+			"Check Booking Inventory freshness for Company Briefing",
+			buildBookingInventoryFreshnessSql(),
+			signal,
+		);
+		const row = rows[0] || {};
+		return { maxActiveDate: getStringValue(row, "maxActiveDate", "max_active_date") };
+	}
+
+	async getJobofferActivityRows(
+		companyId: string,
+		briefingPeriod: BriefingPeriod,
+		signal?: AbortSignal,
+	): Promise<Record<string, unknown>[]> {
+		return this.query(
+			"Load JOBOFFER_ACTIVITY_OVERVIEW for Company Briefing",
+			buildJobofferActivityOverviewSql(companyId, briefingPeriod),
+			signal,
+		);
+	}
+}
+
+function utcDate(value: Date): string {
+	return value.toISOString().slice(0, 10);
+}
+
+function dateOnlyFromUnknown(value: string | null): string | null {
+	if (!value) return null;
+	if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+	const normalized = normalizeTimestamp(value);
+	return normalized ? normalized.slice(0, 10) : null;
+}
+
+export function getBookingInventoryStalenessNotice(
+	freshness: BookingInventoryFreshness,
+	periodTo: string,
+): NoticeItem | undefined {
+	const periodToDate = utcDate(new Date(periodTo));
+	const maxActiveDate = dateOnlyFromUnknown(freshness.maxActiveDate);
+	if (!maxActiveDate) {
+		return platformWarning(
+			"BOOKING_INVENTORY_FRESHNESS_UNKNOWN",
+			"Die Datenfrische des Booking Inventory konnte nicht bestimmt werden.",
+		);
+	}
+	if (maxActiveDate < periodToDate) {
+		return platformWarning(
+			"BOOKING_INVENTORY_STALE",
+			`Booking Inventory wirkt veraltet (max active_date: ${maxActiveDate}, Briefing-Datum: ${periodToDate}).`,
+		);
+	}
+	return undefined;
+}
+
+export async function collectPlatformSignals(args: {
+	companyId: string;
+	briefingPeriod: BriefingPeriod;
+	dataAccess: CompanyBriefingDataAccess;
+	signal?: AbortSignal;
+}): Promise<{ platformSignals: PlatformSignal[]; notices: NoticeItem[] }> {
+	const notices: NoticeItem[] = [];
+	try {
+		const freshness = await args.dataAccess.getBookingInventoryFreshness(args.signal);
+		const stalenessNotice = getBookingInventoryStalenessNotice(freshness, args.briefingPeriod.to);
+		if (stalenessNotice) notices.push(stalenessNotice);
+	} catch {
+		notices.push(
+			platformWarning(
+				"BOOKING_INVENTORY_FRESHNESS_UNAVAILABLE",
+				"Die Datenfrische des Booking Inventory konnte nicht geprüft werden.",
+			),
+		);
+	}
+
+	let rows: Record<string, unknown>[];
+	try {
+		rows = await args.dataAccess.getJobofferActivityRows(args.companyId, args.briefingPeriod, args.signal);
+	} catch {
+		notices.push(
+			platformWarning(
+				"PLATFORM_SIGNALS_QUERY_FAILED",
+				"Platform Signals konnten nicht vollständig geladen werden; das Company Briefing wird ohne Joboffer Activity Overview fortgesetzt.",
+			),
+		);
+		return { platformSignals: [], notices };
+	}
+
+	const mapped = mapJobofferActivityRows(rows);
+	notices.push(...mapped.notices);
+	return {
+		platformSignals: [createJobofferActivityOverviewSignal(mapped.joboffers)],
+		notices,
+	};
+}
+
+function determineBriefingPeriod(
+	company: CompanyContext,
+	periodTo: Date,
+): { period: BriefingPeriod; notices: NoticeItem[] } {
+	const notices: NoticeItem[] = [];
+	if (company.lastReachedCallAt) {
+		const lastReached = new Date(company.lastReachedCallAt);
+		if (!Number.isNaN(lastReached.getTime()) && lastReached.getTime() < periodTo.getTime()) {
+			return {
+				period: {
+					from: lastReached.toISOString(),
+					to: periodTo.toISOString(),
+					basis: "LAST_REACHED_CALL",
+					lastReachedCallAt: lastReached.toISOString(),
+				},
+				notices,
+			};
+		}
+		notices.push(
+			buildNotice(
+				"WARNING",
+				"LAST_REACHED_CALL_INVALID",
+				"Der Last Reached Call liegt nicht vor der Request-Zeit; die 60-Tage-Fallback-Period wurde verwendet.",
+				"CRM_SIGNALS",
+			),
+		);
+	} else {
+		notices.push(
+			buildNotice(
+				"INFO",
+				"BRIEFING_PERIOD_FALLBACK_60_DAYS",
+				"Kein Last Reached Call gefunden; die Briefing Period nutzt den 60-Tage-Fallback.",
+				"CRM_SIGNALS",
+			),
+		);
+	}
+
+	const periodFrom = new Date(periodTo.getTime() - FALLBACK_PERIOD_DAYS * 24 * 60 * 60 * 1000);
+	return {
+		period: {
+			from: periodFrom.toISOString(),
+			to: periodTo.toISOString(),
+			basis: "FALLBACK_60_DAYS",
+			lastReachedCallAt: null,
+		},
+		notices,
+	};
+}
+
+function createFailedResponse(requestId: string, companyId: string, notice: NoticeItem): CompanyBriefingResponse {
+	return {
+		status: "FAILED",
+		requestId,
+		companyId,
+		briefing: null,
+		markdown: null,
+		notices: [notice],
+	};
+}
+
+function hasWarnings(notices: NoticeItem[]): boolean {
+	return notices.some((notice) => notice.severity === "WARNING");
+}
+
+export async function executeCompanyBriefing(
+	input: CompanyBriefingToolInput,
+	services: CompanyBriefingServices,
+	signal?: AbortSignal,
+): Promise<CompanyBriefingResponse> {
+	const requestId = services.requestIdFactory();
+	const fail = (code: string, message: string) =>
+		createFailedResponse(requestId, input.companyId, buildNotice("BLOCKING", code, message, "CRM_SIGNALS"));
+	let companyLookup: CompanyContextLookup;
+	try {
+		companyLookup = await services.dataAccess.getCompanyContext(input.companyId, signal);
+	} catch {
+		return fail(
+			"COMPANY_CONTEXT_UNAVAILABLE",
+			"Der Company Kontext konnte nicht geladen werden; es wurde kein Company Briefing ausgegeben.",
+		);
+	}
+
+	if (companyLookup.status === "not_found") {
+		return fail(
+			"HUBSPOT_COMPANY_NOT_FOUND",
+			"Für diese companyId wurde keine HubSpot Company gefunden; es wurde kein Company Briefing ausgegeben.",
+		);
+	}
+	if (companyLookup.status === "not_unique") {
+		return fail(
+			"HUBSPOT_COMPANY_NOT_UNIQUE",
+			"Für diese companyId wurden mehrere HubSpot Companies gefunden; es wurde kein Company Briefing ausgegeben.",
+		);
+	}
+
+	const company = companyLookup.company;
+
+	const periodTo = services.now();
+	const { period, notices: periodNotices } = determineBriefingPeriod(company, periodTo);
+	const briefingNotices: NoticeItem[] = [...company.notices, ...periodNotices];
+	const platformResult = await collectPlatformSignals({
+		companyId: input.companyId,
+		briefingPeriod: period,
+		dataAccess: services.dataAccess,
+		signal,
+	});
+	briefingNotices.push(...platformResult.notices);
+
+	const briefing: CompanyBriefing = {
+		companyId: input.companyId,
+		companyName: company.companyName,
+		briefingPeriod: period,
+		signalInterpretation: { summary: [], themes: [] },
+		salesOpportunities: [],
+		platformSignals: platformResult.platformSignals,
+		crmSignals: [],
+		notices: briefingNotices,
+	};
+	const markdown = renderCompanyBriefingMarkdown(briefing);
+
+	return {
+		status: hasWarnings(briefingNotices) ? "OK_WITH_WARNINGS" : "OK",
+		requestId,
+		companyId: input.companyId,
+		briefing,
+		markdown,
+		notices: briefingNotices,
+	};
+}
+
+function createDefaultServices(args: CreateCompanyBriefingToolArgs): CompanyBriefingServices {
+	return {
+		dataAccess:
+			args.dataAccess ||
+			new DbtCompanyBriefingDataAccess(args.executor, args.workspaceRoot, args.workingDir, args.sessionDir),
+		now: args.now || (() => new Date()),
+		requestIdFactory: args.requestIdFactory || (() => randomUUID()),
+	};
+}
+
+function sanitizeMarkdownText(value: string): string {
+	return value.replace(/[\r\n]+/g, " ").trim();
+}
+
+function formatDateTimeForMarkdown(value: string | null): string {
+	if (!value) return "unbekannt";
+	const date = new Date(value);
+	if (Number.isNaN(date.getTime())) return value;
+	return `${date.toISOString().replace("T", " ").slice(0, 16)} UTC`;
+}
+
+function formatNullableProduct(joboffer: JobofferActivityOverviewItem): string {
+	if (!joboffer.currentProduct) return "kein aktuelles Product";
+	const since = joboffer.currentProductSince ? ` seit ${formatDateTimeForMarkdown(joboffer.currentProductSince)}` : "";
+	return `${joboffer.currentProduct}${since}`;
+}
+
+function renderExecutiveSummary(briefing: CompanyBriefing): string {
+	const jobofferSignal = briefing.platformSignals.find((signal) => signal.type === JOBOFFER_ACTIVITY_OVERVIEW_TYPE) as
+		| PlatformSignal<JobofferActivityOverviewData>
+		| undefined;
+	return jobofferSignal
+		? jobofferSignal.facts.map((fact) => `- ${fact}`).join("\n")
+		: "- Company Briefing erstellt; die Joboffer Activity Overview ist nicht verfügbar.";
+}
+
+function renderJobofferActivityOverviewMarkdown(signal: PlatformSignal<JobofferActivityOverviewData>): string {
+	const joboffers = signal.data.joboffers;
+	if (joboffers.length === 0) {
+		return "- Keine Joboffers waren in der Briefing Period active.";
+	}
+	const lines: string[] = [];
+	let activeNoActivity = 0;
+	let inactiveNoActivity = 0;
+	for (const joboffer of joboffers) {
+		if (!joboffer.isExpiring && joboffer.newHiresCount === 0 && joboffer.newBewerbungenCount === 0) {
+			if (joboffer.currentlyActive) activeNoActivity += 1;
+			else inactiveNoActivity += 1;
+			continue;
+		}
+		const parts = [
+			`${joboffer.newBewerbungenCount} New Bewerbungen`,
+			`${joboffer.newHiresCount} New Hires`,
+			formatNullableProduct(joboffer),
+			joboffer.isExpiring ? `Expiring am ${formatDateTimeForMarkdown(joboffer.bookingEndsAt)}` : undefined,
+			joboffer.currentlyActive ? "aktuell active" : "aktuell nicht active",
+		].filter((part): part is string => Boolean(part));
+		lines.push(`- *${sanitizeMarkdownText(joboffer.title)}* (${joboffer.jobofferId}): ${parts.join(", ")}`);
+	}
+	if (activeNoActivity > 0) {
+		lines.push(
+			`- ${activeNoActivity} weitere aktuell active Joboffers ohne New Bewerbungen/New Hires in der Briefing Period.`,
+		);
+	}
+	if (inactiveNoActivity > 0) {
+		lines.push(
+			`- ${inactiveNoActivity} weitere Joboffers waren in der Briefing Period active, sind aber aktuell nicht active und hatten keine New Bewerbungen/New Hires.`,
+		);
+	}
+	return lines.join("\n");
+}
+
+function renderPlatformSignalsMarkdown(briefing: CompanyBriefing): string {
+	if (briefing.platformSignals.length === 0) {
+		return "- Platform Signals sind nicht verfügbar.";
+	}
+	return briefing.platformSignals
+		.map((signal) => {
+			if (signal.type === JOBOFFER_ACTIVITY_OVERVIEW_TYPE) {
+				return `### ${signal.title}\n${renderJobofferActivityOverviewMarkdown(
+					signal as PlatformSignal<JobofferActivityOverviewData>,
+				)}`;
+			}
+			return `### ${signal.title}\n${signal.facts.map((fact) => `- ${fact}`).join("\n")}`;
+		})
+		.join("\n\n");
+}
+
+function renderNoticesMarkdown(notices: NoticeItem[]): string {
+	if (notices.length === 0) return "- Keine Hinweise.";
+	return notices
+		.map((notice) => `- ${notice.severity} ${notice.code} (${notice.affectedBlock}): ${notice.message}`)
+		.join("\n");
+}
+
+export function renderCompanyBriefingMarkdown(briefing: CompanyBriefing): string {
+	const period = briefing.briefingPeriod;
+	const basis = period.basis === "LAST_REACHED_CALL" ? "seit Last Reached Call" : "60-Tage-Fallback";
+	return [
+		`# Company Briefing: ${sanitizeMarkdownText(briefing.companyName)}`,
+		"## Briefing Period",
+		`- ${formatDateTimeForMarkdown(period.from)} bis ${formatDateTimeForMarkdown(period.to)} (${basis})`,
+		"## Executive Summary",
+		renderExecutiveSummary(briefing),
+		"## Sales Opportunities",
+		"- Keine Sales Opportunities im V1-company_briefing-Tool enthalten.",
+		"## Platform Signals",
+		renderPlatformSignalsMarkdown(briefing),
+		"## CRM Signals",
+		period.lastReachedCallAt
+			? `- Last Reached Call: ${formatDateTimeForMarkdown(period.lastReachedCallAt)}.`
+			: "- Kein Last Reached Call gefunden; Briefing Period nutzt den 60-Tage-Fallback.",
+		"## Hinweise / Datenlücken",
+		renderNoticesMarkdown(briefing.notices),
+	].join("\n\n");
+}
+
+function renderBlockedResponseText(response: CompanyBriefingResponse): string {
+	return [
+		"Company Briefing konnte nicht erstellt werden.",
+		"",
+		...response.notices.map((notice) => `- ${notice.message}`),
+	].join("\n");
+}
+
+export function createCompanyBriefingTool(
+	args: CreateCompanyBriefingToolArgs,
+): AgentTool<typeof companyBriefingSchema, CompanyBriefingResponse> {
+	const services = createDefaultServices(args);
+	return {
+		name: COMPANY_BRIEFING_TOOL_NAME,
+		label: "company_briefing",
+		description:
+			"Create a JobMatch Company Briefing from companyId and requesterSlackId. Use this tool for Company Briefings; do not reconstruct Company Briefings with arbitrary dbt/BI queries. Returns Slack-ready Markdown and structured, non-raw signal details.",
+		parameters: companyBriefingSchema,
+		execute: async (_toolCallId, params, signal) => {
+			const input = validateCompanyBriefingArgs(params);
+			const response = await executeCompanyBriefing(input, services, signal);
+			return {
+				content: [
+					{
+						type: "text",
+						text: response.markdown || renderBlockedResponseText(response),
+					},
+				],
+				details: response,
+			};
+		},
+	};
+}
+
+export function createWorkerToolsExtension(context: WorkerToolExtensionContext): AgentTool<any>[] {
+	return [
+		createCompanyBriefingTool({
+			executor: context.executor,
+			workspaceRoot: context.workspaceRoot,
+			workingDir: context.workingDir,
+			sessionDir: context.sessionDir,
+		}),
+	];
+}
+
+export default createWorkerToolsExtension;

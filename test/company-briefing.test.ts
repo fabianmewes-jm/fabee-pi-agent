@@ -22,7 +22,6 @@ import { createWorkerTools } from "../src/tools/index.js";
 import type { WorkerRunRequest } from "../src/types.js";
 
 const COMPANY_ID = "34e014ed-1038-476a-b46a-5c61a0fd8c0b";
-const REQUESTER_SLACK_ID = "U123";
 const NOW = new Date("2026-06-23T12:00:00.000Z");
 
 async function tempDir(): Promise<string> {
@@ -120,18 +119,14 @@ afterEach(() => {
 });
 
 describe("company_briefing argument validation", () => {
-	it("accepts V1 arguments and normalizes companyId", () => {
-		expect(validateCompanyBriefingArgs({ companyId: COMPANY_ID.toUpperCase(), requesterSlackId: " U123 " })).toEqual({
+	it("accepts companyId and normalizes it", () => {
+		expect(validateCompanyBriefingArgs({ companyId: COMPANY_ID.toUpperCase() })).toEqual({
 			companyId: COMPANY_ID,
-			requesterSlackId: REQUESTER_SLACK_ID,
 		});
 	});
 
-	it("rejects invalid companyId and missing requesterSlackId", () => {
-		expect(() => validateCompanyBriefingArgs({ companyId: "acme", requesterSlackId: "U123" })).toThrow(/companyId/);
-		expect(() => validateCompanyBriefingArgs({ companyId: COMPANY_ID, requesterSlackId: "" })).toThrow(
-			/requesterSlackId/,
-		);
+	it("rejects invalid companyId", () => {
+		expect(() => validateCompanyBriefingArgs({ companyId: "acme" })).toThrow(/companyId/);
 	});
 });
 
@@ -228,7 +223,7 @@ describe("JOBOFFER_ACTIVITY_OVERVIEW query and mapping", () => {
 describe("company_briefing execution", () => {
 	it("builds a briefing with joboffer activity and stale-inventory warning", async () => {
 		const response = await executeCompanyBriefing(
-			{ companyId: COMPANY_ID, requesterSlackId: REQUESTER_SLACK_ID },
+			{ companyId: COMPANY_ID },
 			servicesFor({ freshness: { maxActiveDate: "2026-06-22" }, rows: sampleRows() }),
 		);
 
@@ -245,7 +240,7 @@ describe("company_briefing execution", () => {
 
 	it("continues with warning output when the BI joboffer query fails", async () => {
 		const response = await executeCompanyBriefing(
-			{ companyId: COMPANY_ID, requesterSlackId: REQUESTER_SLACK_ID },
+			{ companyId: COMPANY_ID },
 			servicesFor({ rowsError: new Error("timeout") }),
 		);
 
@@ -256,10 +251,7 @@ describe("company_briefing execution", () => {
 	});
 
 	it("treats no active Joboffers in the Briefing Period as an empty signal, not an error", async () => {
-		const response = await executeCompanyBriefing(
-			{ companyId: COMPANY_ID, requesterSlackId: REQUESTER_SLACK_ID },
-			servicesFor({ rows: [] }),
-		);
+		const response = await executeCompanyBriefing({ companyId: COMPANY_ID }, servicesFor({ rows: [] }));
 
 		expect(response.status).toBe("OK");
 		expect(response.briefing?.platformSignals[0]).toMatchObject({
@@ -269,11 +261,8 @@ describe("company_briefing execution", () => {
 		expect(response.markdown).toContain("Keine Joboffers waren in der Briefing Period active");
 	});
 
-	it("does not require Slack-to-HubSpot owner mapping in V1", async () => {
-		const response = await executeCompanyBriefing(
-			{ companyId: COMPANY_ID, requesterSlackId: REQUESTER_SLACK_ID },
-			servicesFor({ rows: sampleRows() }),
-		);
+	it("does not require requesterSlackId", async () => {
+		const response = await executeCompanyBriefing({ companyId: COMPANY_ID }, servicesFor({ rows: sampleRows() }));
 
 		expect(response.status).toBe("OK");
 		expect(response.markdown).toContain("# Company Briefing: Acme GmbH");
@@ -294,7 +283,6 @@ describe("company_briefing execution", () => {
 		const result = await tool.execute("tool-call", {
 			label: "Company Briefing",
 			companyId: COMPANY_ID,
-			requesterSlackId: REQUESTER_SLACK_ID,
 		});
 
 		expect(result.content[0]).toMatchObject({ type: "text", text: expect.stringContaining("# Company Briefing") });

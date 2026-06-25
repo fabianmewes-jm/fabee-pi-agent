@@ -69,8 +69,16 @@ export interface JobofferActivityOverviewItem {
 	currentProductSince: string | null;
 	previousProductAssignments: ProductAssignment[];
 	currentlyActive: boolean;
+	wasPaidInPeriod: boolean;
+	wasFreemiumInPeriod: boolean;
 	newBewerbungenCount: number;
+	newPaidBewerbungenCount: number;
+	newFreemiumBewerbungenCount: number;
+	newOtherBewerbungenCount: number;
 	newHiresCount: number;
+	newPaidHiresCount: number;
+	newFreemiumHiresCount: number;
+	newOtherHiresCount: number;
 	isExpiring: boolean;
 	bookingEndsAt: string | null;
 }
@@ -304,6 +312,19 @@ function normalizeBoolean(value: unknown, fieldName: string, jobofferId: string,
 	return false;
 }
 
+function normalizeOptionalCount(value: unknown): number {
+	if (value === null || value === undefined || value === "") return 0;
+	const numberValue = typeof value === "number" ? value : Number.parseInt(String(value), 10);
+	return Number.isFinite(numberValue) && numberValue > 0 ? Math.trunc(numberValue) : 0;
+}
+
+function normalizeOptionalBoolean(value: unknown): boolean {
+	if (value === null || value === undefined || value === "") return false;
+	if (typeof value === "boolean") return value;
+	if (typeof value === "string") return ["true", "t", "1", "yes"].includes(value.trim().toLowerCase());
+	return value === 1;
+}
+
 function parseJsonArray(value: unknown): unknown[] {
 	if (Array.isArray(value)) return value;
 	if (typeof value !== "string") return [];
@@ -424,11 +445,24 @@ export function mapJobofferActivityRows(rows: Record<string, unknown>[]): {
 				jobofferId,
 				notices,
 			),
+			wasPaidInPeriod: normalizeOptionalBoolean(getFieldValue(row, "wasPaidInPeriod", "was_paid_in_period")),
+			wasFreemiumInPeriod: normalizeOptionalBoolean(
+				getFieldValue(row, "wasFreemiumInPeriod", "was_freemium_in_period"),
+			),
 			newBewerbungenCount: normalizeCount(
 				getFieldValue(row, "newBewerbungenCount", "new_bewerbungen_count"),
 				"newBewerbungenCount",
 				jobofferId,
 				notices,
+			),
+			newPaidBewerbungenCount: normalizeOptionalCount(
+				getFieldValue(row, "newPaidBewerbungenCount", "new_paid_bewerbungen_count"),
+			),
+			newFreemiumBewerbungenCount: normalizeOptionalCount(
+				getFieldValue(row, "newFreemiumBewerbungenCount", "new_freemium_bewerbungen_count"),
+			),
+			newOtherBewerbungenCount: normalizeOptionalCount(
+				getFieldValue(row, "newOtherBewerbungenCount", "new_other_bewerbungen_count"),
 			),
 			newHiresCount: normalizeCount(
 				getFieldValue(row, "newHiresCount", "new_hires_count"),
@@ -436,6 +470,11 @@ export function mapJobofferActivityRows(rows: Record<string, unknown>[]): {
 				jobofferId,
 				notices,
 			),
+			newPaidHiresCount: normalizeOptionalCount(getFieldValue(row, "newPaidHiresCount", "new_paid_hires_count")),
+			newFreemiumHiresCount: normalizeOptionalCount(
+				getFieldValue(row, "newFreemiumHiresCount", "new_freemium_hires_count"),
+			),
+			newOtherHiresCount: normalizeOptionalCount(getFieldValue(row, "newOtherHiresCount", "new_other_hires_count")),
 			isExpiring: normalizeBoolean(
 				getFieldValue(row, "isExpiring", "is_expiring"),
 				"isExpiring",
@@ -457,12 +496,22 @@ export function mapJobofferActivityRows(rows: Record<string, unknown>[]): {
 export function createJobofferActivityOverviewSignal(
 	joboffers: JobofferActivityOverviewItem[],
 ): PlatformSignal<JobofferActivityOverviewData> {
-	const newBewerbungen = joboffers.reduce((sum, joboffer) => sum + joboffer.newBewerbungenCount, 0);
-	const newHires = joboffers.reduce((sum, joboffer) => sum + joboffer.newHiresCount, 0);
+	const paidActive = joboffers.filter((joboffer) => joboffer.wasPaidInPeriod).length;
+	const freemiumActive = joboffers.filter((joboffer) => joboffer.wasFreemiumInPeriod).length;
+	const otherActive = Math.max(0, joboffers.length - paidActive - freemiumActive);
+	const paidBewerbungen = joboffers.reduce((sum, joboffer) => sum + joboffer.newPaidBewerbungenCount, 0);
+	const freemiumBewerbungen = joboffers.reduce((sum, joboffer) => sum + joboffer.newFreemiumBewerbungenCount, 0);
+	const paidHires = joboffers.reduce((sum, joboffer) => sum + joboffer.newPaidHiresCount, 0);
+	const freemiumHires = joboffers.reduce((sum, joboffer) => sum + joboffer.newFreemiumHiresCount, 0);
+	const otherBewerbungen = joboffers.reduce((sum, joboffer) => sum + joboffer.newOtherBewerbungenCount, 0);
+	const otherHires = joboffers.reduce((sum, joboffer) => sum + joboffer.newOtherHiresCount, 0);
 	const expiring = joboffers.filter((joboffer) => joboffer.isExpiring).length;
+	const otherSuffix = otherActive > 0 ? `, Other: ${otherActive}` : "";
+	const otherActivitySuffix =
+		otherBewerbungen > 0 || otherHires > 0 ? `; Other ${otherBewerbungen}/${otherHires}` : "";
 	const facts = [
-		`${joboffers.length} Joboffers waren in der Briefing Period active.`,
-		`${newBewerbungen} New Bewerbungen und ${newHires} New Hires in der Briefing Period.`,
+		`${joboffers.length} Joboffers waren in der Briefing Period active (Paid: ${paidActive}, Freemium: ${freemiumActive}${otherSuffix}).`,
+		`New Bewerbungen/Hires: Paid ${paidBewerbungen}/${paidHires}; Freemium ${freemiumBewerbungen}/${freemiumHires}${otherActivitySuffix}.`,
 	];
 	if (expiring > 0) {
 		facts.push(`${expiring} Expiring Joboffers enden innerhalb der nächsten 7 Tage.`);
@@ -686,10 +735,22 @@ previous_product_assignments as (
     group by 1
 ),
 
+inventory_product_buckets as (
+    select
+        iip.joboffer_id,
+        bool_or(iip.product in ('Starter', 'Pro', 'Premium', 'BOOKING_STARTER', 'BOOKING_STANDARD', 'BOOKING_PREMIUM', 'jm_matching_starter', 'jm_matching_01', 'jm_matching_02')) as was_paid_in_period,
+        bool_or(iip.product in ('Freemium', 'ACTIVE', 'jm_matching_free', 'BOOKING_FREE')) as was_freemium_in_period
+    from inventory_in_period iip
+    group by 1
+),
+
 applications_in_period as (
     select
         app.joboffer_id,
-        count(*) as new_bewerbungen_count
+        count(*) as new_bewerbungen_count,
+        count(*) filter (where app.booking_model in ('Starter', 'Pro', 'Premium', 'BOOKING_STARTER', 'BOOKING_STANDARD', 'BOOKING_PREMIUM', 'jm_matching_starter', 'jm_matching_01', 'jm_matching_02')) as new_paid_bewerbungen_count,
+        count(*) filter (where app.booking_model in ('Freemium', 'ACTIVE', 'jm_matching_free', 'BOOKING_FREE')) as new_freemium_bewerbungen_count,
+        count(*) filter (where coalesce(app.booking_model, '') not in ('Starter', 'Pro', 'Premium', 'BOOKING_STARTER', 'BOOKING_STANDARD', 'BOOKING_PREMIUM', 'jm_matching_starter', 'jm_matching_01', 'jm_matching_02', 'Freemium', 'ACTIVE', 'jm_matching_free', 'BOOKING_FREE')) as new_other_bewerbungen_count
     from {{ ref('90_matching__fct_applications') }} app
     inner join params p
         on app.bc_id = p.company_id
@@ -703,7 +764,10 @@ applications_in_period as (
 hires_in_period as (
     select
         app.joboffer_id,
-        count(*) as new_hires_count
+        count(*) as new_hires_count,
+        count(*) filter (where app.booking_model in ('Starter', 'Pro', 'Premium', 'BOOKING_STARTER', 'BOOKING_STANDARD', 'BOOKING_PREMIUM', 'jm_matching_starter', 'jm_matching_01', 'jm_matching_02')) as new_paid_hires_count,
+        count(*) filter (where app.booking_model in ('Freemium', 'ACTIVE', 'jm_matching_free', 'BOOKING_FREE')) as new_freemium_hires_count,
+        count(*) filter (where coalesce(app.booking_model, '') not in ('Starter', 'Pro', 'Premium', 'BOOKING_STARTER', 'BOOKING_STANDARD', 'BOOKING_PREMIUM', 'jm_matching_starter', 'jm_matching_01', 'jm_matching_02', 'Freemium', 'ACTIVE', 'jm_matching_free', 'BOOKING_FREE')) as new_other_hires_count
     from {{ ref('90_matching__fct_applications') }} app
     inner join params p
         on app.bc_id = p.company_id
@@ -729,8 +793,16 @@ final as (
         ci.active_from as "currentProductSince",
         coalesce(ppa.previous_product_assignments_json, '[]'::jsonb) as "previousProductAssignments",
         (ci.joboffer_id is not null) as "currentlyActive",
+        coalesce(ipb.was_paid_in_period, false) as "wasPaidInPeriod",
+        coalesce(ipb.was_freemium_in_period, false) as "wasFreemiumInPeriod",
         coalesce(aip.new_bewerbungen_count, 0) as "newBewerbungenCount",
+        coalesce(aip.new_paid_bewerbungen_count, 0) as "newPaidBewerbungenCount",
+        coalesce(aip.new_freemium_bewerbungen_count, 0) as "newFreemiumBewerbungenCount",
+        coalesce(aip.new_other_bewerbungen_count, 0) as "newOtherBewerbungenCount",
         coalesce(hip.new_hires_count, 0) as "newHiresCount",
+        coalesce(hip.new_paid_hires_count, 0) as "newPaidHiresCount",
+        coalesce(hip.new_freemium_hires_count, 0) as "newFreemiumHiresCount",
+        coalesce(hip.new_other_hires_count, 0) as "newOtherHiresCount",
         (
             ci.joboffer_id is not null
             and ci.booking_cancel_at is not null
@@ -746,6 +818,8 @@ final as (
         on ci.joboffer_id = b.joboffer_id
     left join previous_product_assignments ppa
         on ppa.joboffer_id = b.joboffer_id
+    left join inventory_product_buckets ipb
+        on ipb.joboffer_id = b.joboffer_id
     left join applications_in_period aip
         on aip.joboffer_id = b.joboffer_id
     left join hires_in_period hip
@@ -1071,41 +1145,60 @@ function renderExecutiveSummary(briefing: CompanyBriefing): string {
 		| PlatformSignal<JobofferActivityOverviewData>
 		| undefined;
 	return jobofferSignal
-		? jobofferSignal.facts.map((fact) => `- ${fact}`).join("\n")
-		: "- Company Briefing erstellt; die Joboffer Activity Overview ist nicht verfügbar.";
+		? jobofferSignal.facts.map((fact) => `• ${fact}`).join("\n")
+		: "• Company Briefing erstellt; die Joboffer Activity Overview ist nicht verfügbar.";
 }
 
 function renderJobofferActivityOverviewMarkdown(signal: PlatformSignal<JobofferActivityOverviewData>): string {
 	const joboffers = signal.data.joboffers;
 	if (joboffers.length === 0) {
-		return "- Keine Joboffers waren in der Briefing Period active.";
+		return "• Keine Joboffers waren in der Briefing Period active.";
 	}
-	const lines: string[] = [];
-	let activeNoActivity = 0;
+	const paidActive = joboffers.filter((joboffer) => joboffer.wasPaidInPeriod).length;
+	const freemiumActive = joboffers.filter((joboffer) => joboffer.wasFreemiumInPeriod).length;
+	const paidBewerbungen = joboffers.reduce((sum, joboffer) => sum + joboffer.newPaidBewerbungenCount, 0);
+	const freemiumBewerbungen = joboffers.reduce((sum, joboffer) => sum + joboffer.newFreemiumBewerbungenCount, 0);
+	const paidHires = joboffers.reduce((sum, joboffer) => sum + joboffer.newPaidHiresCount, 0);
+	const freemiumHires = joboffers.reduce((sum, joboffer) => sum + joboffer.newFreemiumHiresCount, 0);
+	const lines: string[] = [
+		`• *Paid:* ${paidActive} active Joboffers, ${paidBewerbungen} New Bewerbungen, ${paidHires} New Hires`,
+		`• *Freemium:* ${freemiumActive} active Joboffers, ${freemiumBewerbungen} New Bewerbungen, ${freemiumHires} New Hires`,
+	];
+	let paidNoActivity = 0;
+	let freemiumNoActivity = 0;
+	let otherNoActivity = 0;
 	let inactiveNoActivity = 0;
 	for (const joboffer of joboffers) {
 		if (!joboffer.isExpiring && joboffer.newHiresCount === 0 && joboffer.newBewerbungenCount === 0) {
-			if (joboffer.currentlyActive) activeNoActivity += 1;
-			else inactiveNoActivity += 1;
+			if (!joboffer.currentlyActive) inactiveNoActivity += 1;
+			else if (joboffer.wasPaidInPeriod) paidNoActivity += 1;
+			else if (joboffer.wasFreemiumInPeriod) freemiumNoActivity += 1;
+			else otherNoActivity += 1;
 			continue;
 		}
 		const parts = [
-			`${joboffer.newBewerbungenCount} New Bewerbungen`,
-			`${joboffer.newHiresCount} New Hires`,
+			`${joboffer.newBewerbungenCount} New Bewerbungen (${joboffer.newPaidBewerbungenCount} Paid / ${joboffer.newFreemiumBewerbungenCount} Freemium)`,
+			`${joboffer.newHiresCount} New Hires (${joboffer.newPaidHiresCount} Paid / ${joboffer.newFreemiumHiresCount} Freemium)`,
 			formatNullableProduct(joboffer),
 			joboffer.isExpiring ? `Expiring am ${formatDateTimeForMarkdown(joboffer.bookingEndsAt)}` : undefined,
 			joboffer.currentlyActive ? "aktuell active" : "aktuell nicht active",
 		].filter((part): part is string => Boolean(part));
-		lines.push(`- *${sanitizeMarkdownText(joboffer.title)}* (${joboffer.jobofferId}): ${parts.join(", ")}`);
+		lines.push(`• *${sanitizeMarkdownText(joboffer.title)}* (${joboffer.jobofferId}): ${parts.join(", ")}`);
 	}
-	if (activeNoActivity > 0) {
+	if (paidNoActivity > 0) {
+		lines.push(`• ${paidNoActivity} weitere active Paid Joboffers ohne New Bewerbungen/New Hires.`);
+	}
+	if (freemiumNoActivity > 0) {
+		lines.push(`• ${freemiumNoActivity} weitere active Freemium Joboffers ohne New Bewerbungen/New Hires.`);
+	}
+	if (otherNoActivity > 0) {
 		lines.push(
-			`- ${activeNoActivity} weitere aktuell active Joboffers ohne New Bewerbungen/New Hires in der Briefing Period.`,
+			`• ${otherNoActivity} weitere active Joboffers ohne Product-Bucket und ohne New Bewerbungen/New Hires.`,
 		);
 	}
 	if (inactiveNoActivity > 0) {
 		lines.push(
-			`- ${inactiveNoActivity} weitere Joboffers waren in der Briefing Period active, sind aber aktuell nicht active und hatten keine New Bewerbungen/New Hires.`,
+			`• ${inactiveNoActivity} weitere Joboffers waren in der Briefing Period active, sind aber aktuell nicht active und hatten keine New Bewerbungen/New Hires.`,
 		);
 	}
 	return lines.join("\n");
@@ -1113,24 +1206,24 @@ function renderJobofferActivityOverviewMarkdown(signal: PlatformSignal<JobofferA
 
 function renderPlatformSignalsMarkdown(briefing: CompanyBriefing): string {
 	if (briefing.platformSignals.length === 0) {
-		return "- Platform Signals sind nicht verfügbar.";
+		return "• Platform Signals sind nicht verfügbar.";
 	}
 	return briefing.platformSignals
 		.map((signal) => {
 			if (signal.type === JOBOFFER_ACTIVITY_OVERVIEW_TYPE) {
-				return `### ${signal.title}\n${renderJobofferActivityOverviewMarkdown(
+				return `*${signal.title}*\n${renderJobofferActivityOverviewMarkdown(
 					signal as PlatformSignal<JobofferActivityOverviewData>,
 				)}`;
 			}
-			return `### ${signal.title}\n${signal.facts.map((fact) => `- ${fact}`).join("\n")}`;
+			return `*${signal.title}*\n${signal.facts.map((fact) => `• ${fact}`).join("\n")}`;
 		})
 		.join("\n\n");
 }
 
 function renderNoticesMarkdown(notices: NoticeItem[]): string {
-	if (notices.length === 0) return "- Keine Hinweise.";
+	if (notices.length === 0) return "• Keine Hinweise.";
 	return notices
-		.map((notice) => `- ${notice.severity} ${notice.code} (${notice.affectedBlock}): ${notice.message}`)
+		.map((notice) => `• ${notice.severity} ${notice.code} (${notice.affectedBlock}): ${notice.message}`)
 		.join("\n");
 }
 
@@ -1138,29 +1231,29 @@ export function renderCompanyBriefingMarkdown(briefing: CompanyBriefing): string
 	const period = briefing.briefingPeriod;
 	const basis = period.basis === "LAST_REACHED_CALL" ? "seit Last Reached Call" : "60-Tage-Fallback";
 	return [
-		`# Company Briefing: ${sanitizeMarkdownText(briefing.companyName)}`,
-		"## Briefing Period",
-		`- ${formatDateTimeForMarkdown(period.from)} bis ${formatDateTimeForMarkdown(period.to)} (${basis})`,
-		"## Executive Summary",
+		`*Company Briefing: ${sanitizeMarkdownText(briefing.companyName)}*`,
+		"*Briefing Period*",
+		`• ${formatDateTimeForMarkdown(period.from)} bis ${formatDateTimeForMarkdown(period.to)} (${basis})`,
+		"*Executive Summary*",
 		renderExecutiveSummary(briefing),
-		"## Sales Opportunities",
-		"- Keine Sales Opportunities im V1-company_briefing-Tool enthalten.",
-		"## Platform Signals",
+		"*Sales Opportunities*",
+		"• Keine Sales Opportunities im V1-company_briefing-Tool enthalten.",
+		"*Platform Signals*",
 		renderPlatformSignalsMarkdown(briefing),
-		"## CRM Signals",
+		"*CRM Signals*",
 		period.lastReachedCallAt
-			? `- Last Reached Call: ${formatDateTimeForMarkdown(period.lastReachedCallAt)}.`
-			: "- Kein Last Reached Call gefunden; Briefing Period nutzt den 60-Tage-Fallback.",
-		"## Hinweise / Datenlücken",
+			? `• Last Reached Call: ${formatDateTimeForMarkdown(period.lastReachedCallAt)}.`
+			: "• Kein Last Reached Call gefunden; Briefing Period nutzt den 60-Tage-Fallback.",
+		"*Hinweise / Datenlücken*",
 		renderNoticesMarkdown(briefing.notices),
 	].join("\n\n");
 }
 
 function renderBlockedResponseText(response: CompanyBriefingResponse): string {
 	return [
-		"Company Briefing konnte nicht erstellt werden.",
+		"*Company Briefing konnte nicht erstellt werden.*",
 		"",
-		...response.notices.map((notice) => `- ${notice.message}`),
+		...response.notices.map((notice) => `• ${notice.message}`),
 	].join("\n");
 }
 

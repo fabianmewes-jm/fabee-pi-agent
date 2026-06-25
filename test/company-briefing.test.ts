@@ -77,8 +77,16 @@ function sampleRows(): Record<string, unknown>[] {
 				{ product: "Starter", from: "2026-06-01T08:00:00+00:00", to: "2026-06-10T08:00:00+00:00" },
 			],
 			currentlyActive: true,
+			wasPaidInPeriod: true,
+			wasFreemiumInPeriod: false,
 			newBewerbungenCount: 6,
+			newPaidBewerbungenCount: 6,
+			newFreemiumBewerbungenCount: 0,
+			newOtherBewerbungenCount: 0,
 			newHiresCount: 1,
+			newPaidHiresCount: 1,
+			newFreemiumHiresCount: 0,
+			newOtherHiresCount: 0,
 			isExpiring: false,
 			bookingEndsAt: null,
 		},
@@ -89,8 +97,16 @@ function sampleRows(): Record<string, unknown>[] {
 			currentProductSince: "2026-06-20T08:00:00+00:00",
 			previousProductAssignments: [],
 			currentlyActive: true,
+			wasPaidInPeriod: true,
+			wasFreemiumInPeriod: false,
 			newBewerbungenCount: 0,
+			newPaidBewerbungenCount: 0,
+			newFreemiumBewerbungenCount: 0,
+			newOtherBewerbungenCount: 0,
 			newHiresCount: 0,
+			newPaidHiresCount: 0,
+			newFreemiumHiresCount: 0,
+			newOtherHiresCount: 0,
 			isExpiring: true,
 			bookingEndsAt: "2026-06-25T08:00:00+00:00",
 		},
@@ -155,6 +171,8 @@ describe("JOBOFFER_ACTIVITY_OVERVIEW query and mapping", () => {
 		expect(sql).toContain("ci.booking_cancel_at < p.period_to + interval '7 days'");
 		expect(sql).toContain('ci.product as "currentProduct"');
 		expect(sql).toContain('ci.active_from as "currentProductSince"');
+		expect(sql).toContain('coalesce(ipb.was_paid_in_period, false) as "wasPaidInPeriod"');
+		expect(sql).toContain('coalesce(aip.new_paid_bewerbungen_count, 0) as "newPaidBewerbungenCount"');
 		expect(sql).not.toContain("wasActiveInPeriod");
 		expect(sql).not.toContain("createdInPeriod");
 		expect(sql).not.toContain("changedInPeriod");
@@ -192,8 +210,16 @@ describe("JOBOFFER_ACTIVITY_OVERVIEW query and mapping", () => {
 					},
 				],
 				currentlyActive: false,
+				wasPaidInPeriod: false,
+				wasFreemiumInPeriod: false,
 				newBewerbungenCount: 2,
+				newPaidBewerbungenCount: 0,
+				newFreemiumBewerbungenCount: 0,
+				newOtherBewerbungenCount: 0,
 				newHiresCount: 0,
+				newPaidHiresCount: 0,
+				newFreemiumHiresCount: 0,
+				newOtherHiresCount: 0,
 				isExpiring: false,
 				bookingEndsAt: null,
 			},
@@ -216,7 +242,7 @@ describe("JOBOFFER_ACTIVITY_OVERVIEW query and mapping", () => {
 			data: { joboffers: expect.any(Array) },
 		});
 		expect(signal.data.joboffers).toHaveLength(2);
-		expect(signal.facts.join("\n")).toContain("6 New Bewerbungen und 1 New Hires");
+		expect(signal.facts.join("\n")).toContain("Paid 6/1; Freemium 0/0");
 	});
 });
 
@@ -233,7 +259,7 @@ describe("company_briefing execution", () => {
 			type: "JOBOFFER_ACTIVITY_OVERVIEW",
 			data: { joboffers: expect.arrayContaining([expect.objectContaining({ jobofferId: "job-1" })]) },
 		});
-		expect(response.markdown).toContain("# Company Briefing: Acme GmbH");
+		expect(response.markdown).toContain("*Company Briefing: Acme GmbH*");
 		expect(response.markdown).toContain("Pflegefachkraft");
 		expect(response.notices.map((notice) => notice.code)).toContain("BOOKING_INVENTORY_STALE");
 	});
@@ -265,7 +291,7 @@ describe("company_briefing execution", () => {
 		const response = await executeCompanyBriefing({ companyId: COMPANY_ID }, servicesFor({ rows: sampleRows() }));
 
 		expect(response.status).toBe("OK");
-		expect(response.markdown).toContain("# Company Briefing: Acme GmbH");
+		expect(response.markdown).toContain("*Company Briefing: Acme GmbH*");
 	});
 
 	it("tool output returns Slack-ready Markdown and structured details without BI raw records", async () => {
@@ -285,7 +311,7 @@ describe("company_briefing execution", () => {
 			companyId: COMPANY_ID,
 		});
 
-		expect(result.content[0]).toMatchObject({ type: "text", text: expect.stringContaining("# Company Briefing") });
+		expect(result.content[0]).toMatchObject({ type: "text", text: expect.stringContaining("*Company Briefing") });
 		expect(result.details).toMatchObject({
 			status: "OK",
 			briefing: { platformSignals: [expect.objectContaining({ type: "JOBOFFER_ACTIVITY_OVERVIEW" })] },
@@ -311,8 +337,16 @@ describe("company_briefing Markdown rendering", () => {
 				currentProductSince: "2026-06-20T08:00:00+00:00",
 				previousProductAssignments: [],
 				currentlyActive: true,
+				wasPaidInPeriod: true,
+				wasFreemiumInPeriod: false,
 				newBewerbungenCount: 0,
+				newPaidBewerbungenCount: 0,
+				newFreemiumBewerbungenCount: 0,
+				newOtherBewerbungenCount: 0,
 				newHiresCount: 0,
+				newPaidHiresCount: 0,
+				newFreemiumHiresCount: 0,
+				newOtherHiresCount: 0,
 				isExpiring: false,
 				bookingEndsAt: null,
 			},
@@ -330,13 +364,13 @@ describe("company_briefing Markdown rendering", () => {
 
 		const markdown = renderCompanyBriefingMarkdown(briefing);
 
-		expect(markdown).toContain("# Company Briefing: Acme GmbH");
+		expect(markdown).toContain("*Company Briefing: Acme GmbH*");
 		for (const heading of "Briefing Period|Executive Summary|Sales Opportunities|Platform Signals|CRM Signals|Hinweise / Datenlücken".split(
 			"|",
 		)) {
-			expect(markdown).toContain(`## ${heading}`);
+			expect(markdown).toContain(`*${heading}*`);
 		}
-		expect(markdown).toContain("1 weitere aktuell active Joboffers ohne New Bewerbungen/New Hires");
+		expect(markdown).toContain("1 weitere active Paid Joboffers ohne New Bewerbungen/New Hires");
 	});
 });
 

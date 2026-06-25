@@ -690,7 +690,7 @@ applications_in_period as (
     select
         app.joboffer_id,
         count(*) as new_bewerbungen_count
-    from {{ ref('40_matching__applications_core_enriched') }} app
+    from {{ ref('90_matching__fct_applications') }} app
     inner join params p
         on app.bc_id = p.company_id
     inner join base_joboffers b
@@ -704,7 +704,7 @@ hires_in_period as (
     select
         app.joboffer_id,
         count(*) as new_hires_count
-    from {{ ref('40_matching__applications_core_enriched') }} app
+    from {{ ref('90_matching__fct_applications') }} app
     inner join params p
         on app.bc_id = p.company_id
     inner join base_joboffers b

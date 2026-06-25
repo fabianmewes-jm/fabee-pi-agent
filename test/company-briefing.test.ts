@@ -148,7 +148,7 @@ describe("JOBOFFER_ACTIVITY_OVERVIEW query and mapping", () => {
 		});
 
 		expect(sql).toContain("{{ ref('90_bookings__fct_active_booking_inventory_daily') }}");
-		expect(sql).toContain("{{ ref('40_matching__applications_core_enriched') }}");
+		expect(sql).toContain("{{ ref('90_matching__fct_applications') }}");
 		expect(sql).toContain("app.applied_at >= p.period_from");
 		expect(sql).toContain("app.applied_at < p.period_to");
 		expect(sql).toContain("inv.active_from <= p.period_to");

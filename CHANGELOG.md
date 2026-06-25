@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.25
+
+- improve Company Briefing Slack formatting and split Joboffer activity signals by Paid vs. Freemium
+
 ## 0.1.24
 
 - query the materialized applications mart for Company Briefing platform signals to avoid slow/fragile intermediate view reads

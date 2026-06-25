@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.27
+
+- feat(company-briefing): improve CSV period handling
+
 ## 0.1.26
 
 - patch feat(company-briefing): attach joboffer CSV and support custom periods

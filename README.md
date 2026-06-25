@@ -140,7 +140,7 @@ or by loading the baked module explicitly:
 BEE_PI_AGENT_TOOL_MODULES=./dist/tools/company-briefing.js
 ```
 
-The tool contract is `companyId` plus `requesterSlackId`. V1 keeps `requesterSlackId` for caller compatibility but does not perform an owner-authorization check. It queries already-built Analytics/dbt models with the prod target by default, and returns Slack-ready Markdown plus structured non-raw signal details. Company Briefings should use this tool and should not be reconstructed through arbitrary dbt/BI queries in the agent prompt path.
+The tool contract is `companyId`. It queries already-built Analytics/dbt models with the prod target by default, and returns Slack-ready Markdown plus structured non-raw signal details. Company Briefings should use this tool and should not be reconstructed through arbitrary dbt/BI queries in the agent prompt path.
 
 Required operational configuration:
 

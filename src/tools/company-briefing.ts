@@ -21,10 +21,6 @@ const companyBriefingSchema = Type.Object(
 			description: "JobMatch Company UUID. Company Briefings must be requested by companyId, not by name.",
 			pattern: COMPANY_ID_PATTERN,
 		}),
-		requesterSlackId: Type.String({
-			description: "Slack user ID of the requester. Kept for the V1 Company Briefing caller contract.",
-			minLength: 1,
-		}),
 	},
 	{ additionalProperties: false },
 );
@@ -156,7 +152,6 @@ export interface CreateCompanyBriefingToolArgs {
 
 export interface CompanyBriefingToolInput {
 	companyId: string;
-	requesterSlackId: string;
 }
 
 function readEnv(...names: string[]): string | undefined {
@@ -372,14 +367,10 @@ export function validateCompanyBriefingArgs(value: unknown): CompanyBriefingTool
 	}
 	const candidate = value as Record<string, unknown>;
 	const companyId = typeof candidate.companyId === "string" ? candidate.companyId.trim() : "";
-	const requesterSlackId = typeof candidate.requesterSlackId === "string" ? candidate.requesterSlackId.trim() : "";
 	if (!new RegExp(COMPANY_ID_PATTERN).test(companyId)) {
 		throw new Error("company_briefing.companyId must be a JobMatch Company UUID");
 	}
-	if (!requesterSlackId) {
-		throw new Error("company_briefing.requesterSlackId is required");
-	}
-	return { companyId: companyId.toLowerCase(), requesterSlackId };
+	return { companyId: companyId.toLowerCase() };
 }
 
 export function mapJobofferActivityRows(rows: Record<string, unknown>[]): {
@@ -699,7 +690,7 @@ applications_in_period as (
     select
         app.joboffer_id,
         count(*) as new_bewerbungen_count
-    from {{ ref('40_matching__applications_core_enriched') }} app
+    from {{ ref('90_matching__fct_applications') }} app
     inner join params p
         on app.bc_id = p.company_id
     inner join base_joboffers b
@@ -713,7 +704,7 @@ hires_in_period as (
     select
         app.joboffer_id,
         count(*) as new_hires_count
-    from {{ ref('40_matching__applications_core_enriched') }} app
+    from {{ ref('90_matching__fct_applications') }} app
     inner join params p
         on app.bc_id = p.company_id
     inner join base_joboffers b
@@ -1181,7 +1172,7 @@ export function createCompanyBriefingTool(
 		name: COMPANY_BRIEFING_TOOL_NAME,
 		label: "company_briefing",
 		description:
-			"Create a JobMatch Company Briefing from companyId and requesterSlackId. Use this tool for Company Briefings; do not reconstruct Company Briefings with arbitrary dbt/BI queries. Returns Slack-ready Markdown and structured, non-raw signal details.",
+			"Create a JobMatch Company Briefing from companyId. Use this tool for Company Briefings; do not reconstruct Company Briefings with arbitrary dbt/BI queries. Returns Slack-ready Markdown and structured, non-raw signal details.",
 		parameters: companyBriefingSchema,
 		execute: async (_toolCallId, params, signal) => {
 			const input = validateCompanyBriefingArgs(params);

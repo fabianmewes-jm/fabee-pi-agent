@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.26
+
+- patch feat(company-briefing): attach joboffer CSV and support custom periods
+
 ## 0.1.25
 
 - improve Company Briefing Slack formatting and split Joboffer activity signals by Paid vs. Freemium

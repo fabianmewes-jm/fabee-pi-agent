@@ -141,6 +141,22 @@ describe("company_briefing argument validation", () => {
 		});
 	});
 
+	it("accepts explicit briefing period dates", () => {
+		expect(
+			validateCompanyBriefingArgs({ companyId: COMPANY_ID, periodFrom: "2026-06-01", periodTo: "2026-06-23" }),
+		).toEqual({
+			companyId: COMPANY_ID,
+			periodFrom: "2026-06-01T00:00:00.000Z",
+			periodTo: "2026-06-23T00:00:00.000Z",
+		});
+	});
+
+	it("rejects periodTo without periodFrom", () => {
+		expect(() => validateCompanyBriefingArgs({ companyId: COMPANY_ID, periodTo: "2026-06-23" })).toThrow(
+			/periodFrom/,
+		);
+	});
+
 	it("rejects invalid companyId", () => {
 		expect(() => validateCompanyBriefingArgs({ companyId: "acme" })).toThrow(/companyId/);
 	});
@@ -294,8 +310,47 @@ describe("company_briefing execution", () => {
 		expect(response.markdown).toContain("*Company Briefing: Acme GmbH*");
 	});
 
-	it("tool output returns Slack-ready Markdown and structured details without BI raw records", async () => {
+	it("uses explicit periodFrom and defaults periodTo to now", async () => {
+		const access = dataAccess({ rows: sampleRows() });
+		const response = await executeCompanyBriefing(
+			{ companyId: COMPANY_ID, periodFrom: "2026-06-10T00:00:00.000Z" },
+			{ dataAccess: access, now: () => NOW, requestIdFactory: () => "request-1" },
+		);
+
+		expect(response.status).toBe("OK");
+		expect(response.briefing?.briefingPeriod).toMatchObject({
+			from: "2026-06-10T00:00:00.000Z",
+			to: NOW.toISOString(),
+			basis: "EXPLICIT",
+		});
+		expect(response.markdown).toContain("expliziter Zeitraum");
+		expect(access.getJobofferActivityRows).toHaveBeenCalledWith(
+			COMPANY_ID,
+			expect.objectContaining({ from: "2026-06-10T00:00:00.000Z", to: NOW.toISOString() }),
+			undefined,
+		);
+	});
+
+	it("blocks invalid explicit periods", async () => {
+		const response = await executeCompanyBriefing(
+			{
+				companyId: COMPANY_ID,
+				periodFrom: "2026-06-23T12:00:00.000Z",
+				periodTo: "2026-06-23T12:00:00.000Z",
+			},
+			servicesFor({ rows: sampleRows() }),
+		);
+
+		expect(response.status).toBe("FAILED");
+		expect(response.notices.map((notice) => notice.code)).toContain("INVALID_BRIEFING_PERIOD");
+	});
+
+	it("tool output returns Slack-ready Markdown, structured details, and a CSV artifact", async () => {
 		const sessionDir = await tempDir();
+		const artifactInputs: unknown[] = [];
+		const artifactHandler = vi.fn(async (input: unknown) => {
+			artifactInputs.push(input);
+		});
 		const tool = createCompanyBriefingTool({
 			executor: { exec: vi.fn(), getWorkspacePath: (path) => path },
 			workspaceRoot: sessionDir,
@@ -304,6 +359,7 @@ describe("company_briefing execution", () => {
 			dataAccess: dataAccess({ rows: sampleRows() }),
 			now: () => NOW,
 			requestIdFactory: () => "request-1",
+			artifactHandler,
 		});
 
 		const result = await tool.execute("tool-call", {
@@ -312,6 +368,17 @@ describe("company_briefing execution", () => {
 		});
 
 		expect(result.content[0]).toMatchObject({ type: "text", text: expect.stringContaining("*Company Briefing") });
+		expect(result.content[0]).toMatchObject({ type: "text", text: expect.stringContaining("CSV angehängt") });
+		expect(artifactHandler).toHaveBeenCalledWith(
+			expect.objectContaining({
+				name: `company_briefing_${COMPANY_ID}_joboffers.csv`,
+				mimeType: "text/csv",
+				data: expect.any(Buffer),
+			}),
+		);
+		const artifactInput = artifactInputs[0] as { data: Buffer } | undefined;
+		expect(artifactInput).toBeDefined();
+		expect(String(artifactInput?.data)).toContain("joboffer_id,title,currently_active");
 		expect(result.details).toMatchObject({
 			status: "OK",
 			briefing: { platformSignals: [expect.objectContaining({ type: "JOBOFFER_ACTIVITY_OVERVIEW" })] },
@@ -371,6 +438,36 @@ describe("company_briefing Markdown rendering", () => {
 			expect(markdown).toContain(`*${heading}*`);
 		}
 		expect(markdown).toContain("1 weitere active Paid Joboffers ohne New Bewerbungen/New Hires");
+	});
+
+	it("keeps only the first five active detail rows inline", () => {
+		const briefingPeriod: BriefingPeriod = {
+			from: "2026-06-01T08:00:00.000Z",
+			to: "2026-06-23T12:00:00.000Z",
+			basis: "LAST_REACHED_CALL",
+			lastReachedCallAt: "2026-06-01T08:00:00.000Z",
+		};
+		const rows = Array.from({ length: 7 }, (_, index) => ({
+			...sampleRows()[0],
+			jobofferId: `job-${index + 1}`,
+			title: `Job ${index + 1}`,
+		}));
+		const briefing: CompanyBriefing = {
+			companyId: COMPANY_ID,
+			companyName: "Acme GmbH",
+			briefingPeriod,
+			signalInterpretation: { summary: [], themes: [] },
+			salesOpportunities: [],
+			platformSignals: [createJobofferActivityOverviewSignal(mapJobofferActivityRows(rows).joboffers)],
+			crmSignals: [],
+			notices: [],
+		};
+
+		const markdown = renderCompanyBriefingMarkdown(briefing);
+
+		expect(markdown).toContain("Job 5");
+		expect(markdown).not.toContain("Job 6");
+		expect(markdown).toContain("2 weitere Joboffers mit New Bewerbungen/New Hires/Expiring nicht inline angezeigt");
 	});
 });
 

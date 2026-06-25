@@ -3,8 +3,10 @@ import { pathToFileURL } from "node:url";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { Executor } from "../sandbox.js";
 import type { WorkerRunRequest } from "../types.js";
+import type { ArtifactHandler } from "./attach.js";
 export interface WorkerToolExtensionContext {
 	executor: Executor;
+	artifactHandler?: ArtifactHandler;
 	request: WorkerRunRequest;
 	workspaceRoot: string;
 	workingDir: string;

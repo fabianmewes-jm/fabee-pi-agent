@@ -39,12 +39,14 @@ export async function createWorkerTools(args: CreateWorkerToolsArgs): Promise<Ag
 				workspaceRoot: args.workspaceRoot,
 				workingDir: args.workingDir,
 				sessionDir: args.sessionDir,
+				artifactHandler: args.artifactHandler,
 			}),
 		);
 	}
 
 	const extensionTools = await loadWorkerToolExtensions({
 		executor: args.executor,
+		artifactHandler: args.artifactHandler,
 		request: args.request,
 		workspaceRoot: args.workspaceRoot,
 		workingDir: args.workingDir,

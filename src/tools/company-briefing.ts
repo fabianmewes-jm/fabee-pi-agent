@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { Type } from "@sinclair/typebox";
 import type { Executor } from "../sandbox.js";
+import type { ArtifactHandler } from "./attach.js";
 import { createDbtTool } from "./dbt.js";
 import type { WorkerToolExtensionContext } from "./extensions.js";
 
@@ -13,6 +14,7 @@ const COMPANY_ID_PATTERN = "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-
 const FALLBACK_PERIOD_DAYS = 60;
 const DEFAULT_QUERY_TIMEOUT_SECONDS = 45;
 const DEFAULT_QUERY_LIMIT = 1000;
+const INLINE_JOBOFFER_DETAIL_LIMIT = 5;
 
 const companyBriefingSchema = Type.Object(
 	{
@@ -21,6 +23,14 @@ const companyBriefingSchema = Type.Object(
 			description: "JobMatch Company UUID. Company Briefings must be requested by companyId, not by name.",
 			pattern: COMPANY_ID_PATTERN,
 		}),
+		periodFrom: Type.Optional(
+			Type.String({ description: "Optional explicit briefing start timestamp/date, e.g. 2026-06-01 or ISO-8601." }),
+		),
+		periodTo: Type.Optional(
+			Type.String({
+				description: "Optional explicit briefing end timestamp/date. Defaults to now when periodFrom is set.",
+			}),
+		),
 	},
 	{ additionalProperties: false },
 );
@@ -39,7 +49,7 @@ export interface NoticeItem {
 export interface BriefingPeriod {
 	from: string;
 	to: string;
-	basis: "LAST_REACHED_CALL" | "FALLBACK_60_DAYS";
+	basis: "LAST_REACHED_CALL" | "FALLBACK_60_DAYS" | "EXPLICIT";
 	lastReachedCallAt: string | null;
 }
 
@@ -156,10 +166,13 @@ export interface CreateCompanyBriefingToolArgs {
 	dataAccess?: CompanyBriefingDataAccess;
 	now?: () => Date;
 	requestIdFactory?: () => string;
+	artifactHandler?: ArtifactHandler;
 }
 
 export interface CompanyBriefingToolInput {
 	companyId: string;
+	periodFrom?: string;
+	periodTo?: string;
 }
 
 function readEnv(...names: string[]): string | undefined {
@@ -382,6 +395,14 @@ function normalizePreviousProductAssignments(
 	return assignments;
 }
 
+function normalizeInputTimestamp(value: unknown, fieldName: string): string | undefined {
+	if (value === null || value === undefined || value === "") return undefined;
+	if (typeof value !== "string") throw new Error(`company_briefing.${fieldName} must be a timestamp string`);
+	const normalized = normalizeTimestamp(value);
+	if (!normalized) throw new Error(`company_briefing.${fieldName} must be a valid timestamp/date`);
+	return normalized;
+}
+
 export function validateCompanyBriefingArgs(value: unknown): CompanyBriefingToolInput {
 	if (!value || typeof value !== "object") {
 		throw new Error("company_briefing arguments must be an object");
@@ -391,7 +412,12 @@ export function validateCompanyBriefingArgs(value: unknown): CompanyBriefingTool
 	if (!new RegExp(COMPANY_ID_PATTERN).test(companyId)) {
 		throw new Error("company_briefing.companyId must be a JobMatch Company UUID");
 	}
-	return { companyId: companyId.toLowerCase() };
+	const periodFrom = normalizeInputTimestamp(candidate.periodFrom, "periodFrom");
+	const periodTo = normalizeInputTimestamp(candidate.periodTo, "periodTo");
+	if (periodTo && !periodFrom) {
+		throw new Error("company_briefing.periodFrom is required when periodTo is set");
+	}
+	return { companyId: companyId.toLowerCase(), periodFrom, periodTo };
 }
 
 export function mapJobofferActivityRows(rows: Record<string, unknown>[]): {
@@ -983,6 +1009,20 @@ export async function collectPlatformSignals(args: {
 	};
 }
 
+function determineExplicitBriefingPeriod(
+	input: CompanyBriefingToolInput,
+	company: CompanyContext,
+	now: Date,
+): BriefingPeriod | undefined {
+	if (!input.periodFrom) return undefined;
+	return {
+		from: input.periodFrom,
+		to: input.periodTo || now.toISOString(),
+		basis: "EXPLICIT",
+		lastReachedCallAt: normalizeTimestamp(company.lastReachedCallAt),
+	};
+}
+
 function determineBriefingPeriod(
 	company: CompanyContext,
 	periodTo: Date,
@@ -1081,7 +1121,16 @@ export async function executeCompanyBriefing(
 	const company = companyLookup.company;
 
 	const periodTo = services.now();
-	const { period, notices: periodNotices } = determineBriefingPeriod(company, periodTo);
+	const explicitPeriod = determineExplicitBriefingPeriod(input, company, periodTo);
+	if (explicitPeriod && new Date(explicitPeriod.from).getTime() >= new Date(explicitPeriod.to).getTime()) {
+		return fail(
+			"INVALID_BRIEFING_PERIOD",
+			"Die explizite Briefing Period ist ungültig; periodFrom muss vor periodTo liegen.",
+		);
+	}
+	const { period, notices: periodNotices } = explicitPeriod
+		? { period: explicitPeriod, notices: [] }
+		: determineBriefingPeriod(company, periodTo);
 	const briefingNotices: NoticeItem[] = [...company.notices, ...periodNotices];
 	const platformResult = await collectPlatformSignals({
 		companyId: input.companyId,
@@ -1140,10 +1189,16 @@ function formatNullableProduct(joboffer: JobofferActivityOverviewItem): string {
 	return `${joboffer.currentProduct}${since}`;
 }
 
-function renderExecutiveSummary(briefing: CompanyBriefing): string {
-	const jobofferSignal = briefing.platformSignals.find((signal) => signal.type === JOBOFFER_ACTIVITY_OVERVIEW_TYPE) as
+function findJobofferActivitySignal(
+	briefing: CompanyBriefing,
+): PlatformSignal<JobofferActivityOverviewData> | undefined {
+	return briefing.platformSignals.find((signal) => signal.type === JOBOFFER_ACTIVITY_OVERVIEW_TYPE) as
 		| PlatformSignal<JobofferActivityOverviewData>
 		| undefined;
+}
+
+function renderExecutiveSummary(briefing: CompanyBriefing): string {
+	const jobofferSignal = findJobofferActivitySignal(briefing);
 	return jobofferSignal
 		? jobofferSignal.facts.map((fact) => `• ${fact}`).join("\n")
 		: "• Company Briefing erstellt; die Joboffer Activity Overview ist nicht verfügbar.";
@@ -1168,6 +1223,8 @@ function renderJobofferActivityOverviewMarkdown(signal: PlatformSignal<JobofferA
 	let freemiumNoActivity = 0;
 	let otherNoActivity = 0;
 	let inactiveNoActivity = 0;
+	let hiddenWithSignals = 0;
+	let shownWithSignals = 0;
 	for (const joboffer of joboffers) {
 		if (!joboffer.isExpiring && joboffer.newHiresCount === 0 && joboffer.newBewerbungenCount === 0) {
 			if (!joboffer.currentlyActive) inactiveNoActivity += 1;
@@ -1176,6 +1233,11 @@ function renderJobofferActivityOverviewMarkdown(signal: PlatformSignal<JobofferA
 			else otherNoActivity += 1;
 			continue;
 		}
+		if (shownWithSignals >= INLINE_JOBOFFER_DETAIL_LIMIT) {
+			hiddenWithSignals += 1;
+			continue;
+		}
+		shownWithSignals += 1;
 		const parts = [
 			`${joboffer.newBewerbungenCount} New Bewerbungen (${joboffer.newPaidBewerbungenCount} Paid / ${joboffer.newFreemiumBewerbungenCount} Freemium)`,
 			`${joboffer.newHiresCount} New Hires (${joboffer.newPaidHiresCount} Paid / ${joboffer.newFreemiumHiresCount} Freemium)`,
@@ -1184,6 +1246,11 @@ function renderJobofferActivityOverviewMarkdown(signal: PlatformSignal<JobofferA
 			joboffer.currentlyActive ? "aktuell active" : "aktuell nicht active",
 		].filter((part): part is string => Boolean(part));
 		lines.push(`• *${sanitizeMarkdownText(joboffer.title)}* (${joboffer.jobofferId}): ${parts.join(", ")}`);
+	}
+	if (hiddenWithSignals > 0) {
+		lines.push(
+			`• ${hiddenWithSignals} weitere Joboffers mit New Bewerbungen/New Hires/Expiring nicht inline angezeigt.`,
+		);
 	}
 	if (paidNoActivity > 0) {
 		lines.push(`• ${paidNoActivity} weitere active Paid Joboffers ohne New Bewerbungen/New Hires.`);
@@ -1229,7 +1296,17 @@ function renderNoticesMarkdown(notices: NoticeItem[]): string {
 
 export function renderCompanyBriefingMarkdown(briefing: CompanyBriefing): string {
 	const period = briefing.briefingPeriod;
-	const basis = period.basis === "LAST_REACHED_CALL" ? "seit Last Reached Call" : "60-Tage-Fallback";
+	const basis =
+		period.basis === "LAST_REACHED_CALL"
+			? "seit Last Reached Call"
+			: period.basis === "EXPLICIT"
+				? "expliziter Zeitraum"
+				: "60-Tage-Fallback";
+	const crmSignals = period.lastReachedCallAt
+		? `• Last Reached Call: ${formatDateTimeForMarkdown(period.lastReachedCallAt)}.`
+		: period.basis === "FALLBACK_60_DAYS"
+			? "• Kein Last Reached Call gefunden; Briefing Period nutzt den 60-Tage-Fallback."
+			: "• Kein Last Reached Call gefunden.";
 	return [
 		`*Company Briefing: ${sanitizeMarkdownText(briefing.companyName)}*`,
 		"*Briefing Period*",
@@ -1241,9 +1318,7 @@ export function renderCompanyBriefingMarkdown(briefing: CompanyBriefing): string
 		"*Platform Signals*",
 		renderPlatformSignalsMarkdown(briefing),
 		"*CRM Signals*",
-		period.lastReachedCallAt
-			? `• Last Reached Call: ${formatDateTimeForMarkdown(period.lastReachedCallAt)}.`
-			: "• Kein Last Reached Call gefunden; Briefing Period nutzt den 60-Tage-Fallback.",
+		crmSignals,
 		"*Hinweise / Datenlücken*",
 		renderNoticesMarkdown(briefing.notices),
 	].join("\n\n");
@@ -1255,6 +1330,72 @@ function renderBlockedResponseText(response: CompanyBriefingResponse): string {
 		"",
 		...response.notices.map((notice) => `• ${notice.message}`),
 	].join("\n");
+}
+
+function csvValue(value: unknown): string {
+	const text = value === null || value === undefined ? "" : String(value);
+	return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+function renderJobofferDetailsCsv(joboffers: JobofferActivityOverviewItem[]): string {
+	const header = [
+		"joboffer_id",
+		"title",
+		"currently_active",
+		"current_product",
+		"current_product_since",
+		"was_paid_in_period",
+		"was_freemium_in_period",
+		"new_bewerbungen_total",
+		"new_bewerbungen_paid",
+		"new_bewerbungen_freemium",
+		"new_bewerbungen_other",
+		"new_hires_total",
+		"new_hires_paid",
+		"new_hires_freemium",
+		"new_hires_other",
+		"is_expiring",
+		"booking_ends_at",
+		"previous_product_assignments",
+	];
+	const rows = joboffers.map((joboffer) => [
+		joboffer.jobofferId,
+		joboffer.title,
+		joboffer.currentlyActive,
+		joboffer.currentProduct,
+		joboffer.currentProductSince,
+		joboffer.wasPaidInPeriod,
+		joboffer.wasFreemiumInPeriod,
+		joboffer.newBewerbungenCount,
+		joboffer.newPaidBewerbungenCount,
+		joboffer.newFreemiumBewerbungenCount,
+		joboffer.newOtherBewerbungenCount,
+		joboffer.newHiresCount,
+		joboffer.newPaidHiresCount,
+		joboffer.newFreemiumHiresCount,
+		joboffer.newOtherHiresCount,
+		joboffer.isExpiring,
+		joboffer.bookingEndsAt,
+		JSON.stringify(joboffer.previousProductAssignments),
+	]);
+	return `${[header, ...rows].map((row) => row.map(csvValue).join(",")).join("\n")}\n`;
+}
+
+async function attachJobofferDetailsCsv(
+	response: CompanyBriefingResponse,
+	artifactHandler?: ArtifactHandler,
+): Promise<boolean> {
+	if (!artifactHandler || !response.briefing) return false;
+	const jobofferSignal = findJobofferActivitySignal(response.briefing);
+	const joboffers = jobofferSignal?.data.joboffers || [];
+	if (joboffers.length === 0) return false;
+	await artifactHandler({
+		data: Buffer.from(renderJobofferDetailsCsv(joboffers), "utf-8"),
+		name: `company_briefing_${response.companyId}_joboffers.csv`,
+		title: "Company Briefing Joboffer Details CSV",
+		mimeType: "text/csv",
+	});
+	return true;
 }
 
 export function createCompanyBriefingTool(
@@ -1270,11 +1411,13 @@ export function createCompanyBriefingTool(
 		execute: async (_toolCallId, params, signal) => {
 			const input = validateCompanyBriefingArgs(params);
 			const response = await executeCompanyBriefing(input, services, signal);
+			const csvAttached = await attachJobofferDetailsCsv(response, args.artifactHandler);
+			const text = response.markdown || renderBlockedResponseText(response);
 			return {
 				content: [
 					{
 						type: "text",
-						text: response.markdown || renderBlockedResponseText(response),
+						text: csvAttached ? `${text}\n\n• Vollständige Joboffer-Detailtabelle als CSV angehängt.` : text,
 					},
 				],
 				details: response,
@@ -1290,6 +1433,7 @@ export function createWorkerToolsExtension(context: WorkerToolExtensionContext):
 			workspaceRoot: context.workspaceRoot,
 			workingDir: context.workingDir,
 			sessionDir: context.sessionDir,
+			artifactHandler: context.artifactHandler,
 		}),
 	];
 }

@@ -12,6 +12,7 @@ export const JOBOFFER_ACTIVITY_OVERVIEW_TYPE = "JOBOFFER_ACTIVITY_OVERVIEW";
 
 const COMPANY_ID_PATTERN = "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$";
 const FALLBACK_PERIOD_DAYS = 60;
+const MAX_LAST_REACHED_CALL_AGE_DAYS = 180;
 const DEFAULT_QUERY_TIMEOUT_SECONDS = 45;
 const DEFAULT_QUERY_LIMIT = 1000;
 const INLINE_JOBOFFER_DETAIL_LIMIT = 5;
@@ -1031,24 +1032,37 @@ function determineBriefingPeriod(
 	if (company.lastReachedCallAt) {
 		const lastReached = new Date(company.lastReachedCallAt);
 		if (!Number.isNaN(lastReached.getTime()) && lastReached.getTime() < periodTo.getTime()) {
-			return {
-				period: {
-					from: lastReached.toISOString(),
-					to: periodTo.toISOString(),
-					basis: "LAST_REACHED_CALL",
-					lastReachedCallAt: lastReached.toISOString(),
-				},
-				notices,
-			};
+			const ageMs = periodTo.getTime() - lastReached.getTime();
+			const maxAgeMs = MAX_LAST_REACHED_CALL_AGE_DAYS * 24 * 60 * 60 * 1000;
+			if (ageMs <= maxAgeMs) {
+				return {
+					period: {
+						from: lastReached.toISOString(),
+						to: periodTo.toISOString(),
+						basis: "LAST_REACHED_CALL",
+						lastReachedCallAt: lastReached.toISOString(),
+					},
+					notices,
+				};
+			}
+			notices.push(
+				buildNotice(
+					"WARNING",
+					"LAST_REACHED_CALL_TOO_OLD",
+					"Der Last Reached Call ist älter als 180 Tage; die 60-Tage-Fallback-Period wurde verwendet.",
+					"CRM_SIGNALS",
+				),
+			);
+		} else {
+			notices.push(
+				buildNotice(
+					"WARNING",
+					"LAST_REACHED_CALL_INVALID",
+					"Der Last Reached Call liegt nicht vor der Request-Zeit; die 60-Tage-Fallback-Period wurde verwendet.",
+					"CRM_SIGNALS",
+				),
+			);
 		}
-		notices.push(
-			buildNotice(
-				"WARNING",
-				"LAST_REACHED_CALL_INVALID",
-				"Der Last Reached Call liegt nicht vor der Request-Zeit; die 60-Tage-Fallback-Period wurde verwendet.",
-				"CRM_SIGNALS",
-			),
-		);
 	} else {
 		notices.push(
 			buildNotice(
@@ -1305,7 +1319,7 @@ export function renderCompanyBriefingMarkdown(briefing: CompanyBriefing): string
 	const crmSignals = period.lastReachedCallAt
 		? `• Last Reached Call: ${formatDateTimeForMarkdown(period.lastReachedCallAt)}.`
 		: period.basis === "FALLBACK_60_DAYS"
-			? "• Kein Last Reached Call gefunden; Briefing Period nutzt den 60-Tage-Fallback."
+			? "• Briefing Period nutzt den 60-Tage-Fallback."
 			: "• Kein Last Reached Call gefunden.";
 	return [
 		`*Company Briefing: ${sanitizeMarkdownText(briefing.companyName)}*`,

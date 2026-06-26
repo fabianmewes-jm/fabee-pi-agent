@@ -310,6 +310,34 @@ describe("company_briefing execution", () => {
 		expect(response.markdown).toContain("*Company Briefing: Acme GmbH*");
 	});
 
+	it("falls back to 60 days when the last reached call is older than 180 days", async () => {
+		const oldCallAt = "2025-12-01T08:00:00.000Z";
+		const fallbackFrom = new Date(NOW.getTime() - 60 * 24 * 60 * 60 * 1000).toISOString();
+		const access = dataAccess({
+			companyLookup: { status: "found", company: companyContext({ lastReachedCallAt: oldCallAt }) },
+		});
+
+		const response = await executeCompanyBriefing(
+			{ companyId: COMPANY_ID },
+			{ dataAccess: access, now: () => NOW, requestIdFactory: () => "request-1" },
+		);
+
+		expect(response.status).toBe("OK_WITH_WARNINGS");
+		expect(response.briefing?.briefingPeriod).toMatchObject({
+			from: fallbackFrom,
+			to: NOW.toISOString(),
+			basis: "FALLBACK_60_DAYS",
+			lastReachedCallAt: null,
+		});
+		expect(response.notices.map((notice) => notice.code)).toContain("LAST_REACHED_CALL_TOO_OLD");
+		expect(response.markdown).toContain("Briefing Period nutzt den 60-Tage-Fallback");
+		expect(access.getJobofferActivityRows).toHaveBeenCalledWith(
+			COMPANY_ID,
+			expect.objectContaining({ from: fallbackFrom, basis: "FALLBACK_60_DAYS" }),
+			undefined,
+		);
+	});
+
 	it("uses explicit periodFrom and defaults periodTo to now", async () => {
 		const access = dataAccess({ rows: sampleRows() });
 		const response = await executeCompanyBriefing(

@@ -9,6 +9,7 @@ import type { WorkerToolExtensionContext } from "./extensions.js";
 
 export const COMPANY_BRIEFING_TOOL_NAME = "company_briefing";
 export const JOBOFFER_ACTIVITY_OVERVIEW_TYPE = "JOBOFFER_ACTIVITY_OVERVIEW";
+export const CRM_ACTIVITY_OVERVIEW_TYPE = "CRM_ACTIVITY_OVERVIEW";
 
 const COMPANY_ID_PATTERN = "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$";
 const FALLBACK_PERIOD_DAYS = 60;
@@ -16,6 +17,7 @@ const MAX_LAST_REACHED_CALL_AGE_DAYS = 180;
 const DEFAULT_QUERY_TIMEOUT_SECONDS = 45;
 const DEFAULT_QUERY_LIMIT = 1000;
 const INLINE_JOBOFFER_DETAIL_LIMIT = 5;
+const INLINE_CRM_ACTIVITY_LIMIT = 5;
 
 const companyBriefingSchema = Type.Object(
 	{
@@ -106,6 +108,20 @@ export interface CrmSignal<TData = unknown> {
 	data?: TData;
 }
 
+export interface CrmActivityItem {
+	objectType: string;
+	objectId: string;
+	occurredAt: string;
+	title: string;
+	detail: string | null;
+	transcriptExcerpt: string | null;
+}
+
+export interface CrmActivityOverviewData {
+	activities: CrmActivityItem[];
+	countsByType: Record<string, number>;
+}
+
 export interface CompanyBriefing {
 	companyId: string;
 	companyName: string;
@@ -147,6 +163,11 @@ export interface CompanyBriefingDataAccess {
 	getCompanyContext(companyId: string, signal?: AbortSignal): Promise<CompanyContextLookup>;
 	getBookingInventoryFreshness(signal?: AbortSignal): Promise<BookingInventoryFreshness>;
 	getJobofferActivityRows(
+		companyId: string,
+		briefingPeriod: BriefingPeriod,
+		signal?: AbortSignal,
+	): Promise<Record<string, unknown>[]>;
+	getCrmActivityRows(
 		companyId: string,
 		briefingPeriod: BriefingPeriod,
 		signal?: AbortSignal,
@@ -569,6 +590,153 @@ function platformWarning(code: string, message: string): NoticeItem {
 	return buildNotice("WARNING", code, message, "PLATFORM_SIGNALS");
 }
 
+function crmWarning(code: string, message: string): NoticeItem {
+	return buildNotice("WARNING", code, message, "CRM_SIGNALS");
+}
+
+function truncateText(value: string | null, maxLength: number): string | null {
+	if (!value) return null;
+	const text = value.replace(/\s+/g, " ").trim();
+	if (text.length <= maxLength) return text;
+	return `${text.slice(0, Math.max(0, maxLength - 1)).trim()}…`;
+}
+
+function formatCrmTypeLabel(objectType: string): string {
+	switch (objectType) {
+		case "call":
+			return "Call";
+		case "email":
+			return "Email";
+		case "deal":
+			return "Deal";
+		case "note":
+			return "Note";
+		case "meeting":
+			return "Meeting";
+		case "task":
+			return "Task";
+		default:
+			return objectType;
+	}
+}
+
+function createCrmActivityTitle(row: Record<string, unknown>, objectType: string, objectId: string): string {
+	const title =
+		objectType === "call"
+			? getStringValue(row, "callTitle", "call_title", "callSummary", "call_summary")
+			: objectType === "email"
+				? getStringValue(row, "emailSubject", "email_subject")
+				: objectType === "deal"
+					? getStringValue(row, "dealName", "deal_name")
+					: objectType === "task"
+						? getStringValue(row, "taskSubject", "task_subject")
+						: objectType === "meeting"
+							? getStringValue(row, "meetingTitle", "meeting_title")
+							: truncateText(getStringValue(row, "noteBody", "note_body"), 80);
+	return title || `${formatCrmTypeLabel(objectType)} ${objectId}`;
+}
+
+function compactParts(...parts: Array<string | null>): string | null {
+	const compacted = parts.filter((part): part is string => Boolean(part));
+	return compacted.length > 0 ? compacted.join(", ") : null;
+}
+
+function createCrmActivityDetail(row: Record<string, unknown>, objectType: string): string | null {
+	const transcriptExcerpt = truncateText(getStringValue(row, "transcriptText", "transcript_text"), 180);
+	switch (objectType) {
+		case "call":
+			return compactParts(
+				getStringValue(row, "callDirection", "call_direction"),
+				getStringValue(row, "callStatus", "call_status"),
+				getStringValue(row, "callDisposition", "call_disposition"),
+				truncateText(getStringValue(row, "callSummary", "call_summary"), 180) || transcriptExcerpt,
+			);
+		case "email":
+			return compactParts(
+				getStringValue(row, "emailDirection", "email_direction"),
+				getStringValue(row, "emailStatus", "email_status"),
+				getStringValue(row, "emailFromEmail", "email_from_email"),
+				getStringValue(row, "emailToEmail", "email_to_email"),
+			);
+		case "deal":
+			return compactParts(
+				getStringValue(row, "dealStage", "deal_stage"),
+				getStringValue(row, "dealPipeline", "deal_pipeline"),
+				getStringValue(row, "dealAmountRaw", "deal_amount_raw"),
+			);
+		case "task":
+			return compactParts(
+				getStringValue(row, "taskStatus", "task_status"),
+				getStringValue(row, "taskPriority", "task_priority"),
+				getStringValue(row, "taskType", "task_type"),
+			);
+		case "meeting":
+			return compactParts(getStringValue(row, "meetingOutcome", "meeting_outcome"));
+		case "note":
+			return truncateText(getStringValue(row, "noteBody", "note_body"), 180);
+		default:
+			return null;
+	}
+}
+
+export function mapCrmActivityRows(rows: Record<string, unknown>[]): {
+	activities: CrmActivityItem[];
+	notices: NoticeItem[];
+} {
+	const notices: NoticeItem[] = [];
+	const activities: CrmActivityItem[] = [];
+
+	for (const row of rows) {
+		const objectType = getStringValue(row, "objectType", "object_type_label")?.toLowerCase();
+		const objectId = getStringValue(row, "objectId", "object_id");
+		const occurredAt = normalizeTimestamp(getFieldValue(row, "occurredAt", "occurred_at"));
+		if (!objectType || !objectId || !occurredAt) {
+			notices.push(
+				crmWarning(
+					"UNEXPECTED_INVALID_CRM_ACTIVITY_ROW",
+					"Ein CRM Activity Eintrag ohne objectType, objectId oder occurredAt wurde ausgelassen.",
+				),
+			);
+			continue;
+		}
+
+		activities.push({
+			objectType,
+			objectId,
+			occurredAt,
+			title: createCrmActivityTitle(row, objectType, objectId),
+			detail: createCrmActivityDetail(row, objectType),
+			transcriptExcerpt: truncateText(getStringValue(row, "transcriptText", "transcript_text"), 240),
+		});
+	}
+
+	return { activities, notices };
+}
+
+export function createCrmActivityOverviewSignal(activities: CrmActivityItem[]): CrmSignal<CrmActivityOverviewData> {
+	const countsByType = activities.reduce<Record<string, number>>((counts, activity) => {
+		counts[activity.objectType] = (counts[activity.objectType] || 0) + 1;
+		return counts;
+	}, {});
+	const countSummary = Object.entries(countsByType)
+		.sort(([left], [right]) => left.localeCompare(right))
+		.map(([type, count]) => `${formatCrmTypeLabel(type)}: ${count}`)
+		.join(", ");
+	const facts = [
+		activities.length === 0
+			? "Keine CRM Aktivitäten in der Briefing Period gefunden."
+			: `${activities.length} CRM Aktivitäten in der Briefing Period gefunden (${countSummary}).`,
+	];
+
+	return {
+		id: "crm.activityOverview",
+		type: CRM_ACTIVITY_OVERVIEW_TYPE,
+		title: "CRM Aktivitätsübersicht",
+		facts,
+		data: { activities, countsByType },
+	};
+}
+
 function mapCompanyContextRows(rows: Record<string, unknown>[], requestedCompanyId: string): CompanyContextLookup {
 	if (rows.length === 0) return { status: "not_found" };
 	if (rows.length > 1) return { status: "not_unique" };
@@ -870,6 +1038,53 @@ order by
     "jobofferId" asc`;
 }
 
+export function buildCrmActivitySql(companyId: string, briefingPeriod: BriefingPeriod): string {
+	return `
+with params as (
+    select
+        ${sqlLiteral(companyId)}::text as company_id,
+        ${sqlLiteral(briefingPeriod.from)}::timestamptz as period_from,
+        ${sqlLiteral(briefingPeriod.to)}::timestamptz as period_to
+)
+
+select
+    crm.object_type_label as "objectType",
+    crm.object_id as "objectId",
+    crm.occurred_at as "occurredAt",
+    crm.deal_name as "dealName",
+    crm.deal_pipeline as "dealPipeline",
+    crm.deal_stage as "dealStage",
+    crm.deal_amount_raw as "dealAmountRaw",
+    crm.task_subject as "taskSubject",
+    crm.task_status as "taskStatus",
+    crm.task_priority as "taskPriority",
+    crm.task_type as "taskType",
+    left(crm.note_body, 1000) as "noteBody",
+    crm.call_title as "callTitle",
+    crm.call_direction as "callDirection",
+    crm.call_status as "callStatus",
+    crm.call_disposition as "callDisposition",
+    left(crm.call_summary, 1000) as "callSummary",
+    crm.has_transcript as "hasTranscript",
+    left(crm.transcript_text, 1000) as "transcriptText",
+    crm.email_subject as "emailSubject",
+    crm.email_direction as "emailDirection",
+    crm.email_status as "emailStatus",
+    crm.email_from_email as "emailFromEmail",
+    crm.email_to_email as "emailToEmail",
+    crm.meeting_title as "meetingTitle",
+    crm.meeting_outcome as "meetingOutcome"
+from {{ ref('90_hubspot__fct_company_briefing_crm_activity') }} crm
+inner join params p
+    on crm.company_id = p.company_id
+where crm.occurred_at >= p.period_from
+  and crm.occurred_at < p.period_to
+order by
+    crm.occurred_at desc,
+    crm.object_type_label asc,
+    crm.object_id asc`;
+}
+
 class DbtCompanyBriefingDataAccess implements CompanyBriefingDataAccess {
 	constructor(
 		private readonly executor: Executor,
@@ -932,6 +1147,18 @@ class DbtCompanyBriefingDataAccess implements CompanyBriefingDataAccess {
 		return this.query(
 			"Load JOBOFFER_ACTIVITY_OVERVIEW for Company Briefing",
 			buildJobofferActivityOverviewSql(companyId, briefingPeriod),
+			signal,
+		);
+	}
+
+	async getCrmActivityRows(
+		companyId: string,
+		briefingPeriod: BriefingPeriod,
+		signal?: AbortSignal,
+	): Promise<Record<string, unknown>[]> {
+		return this.query(
+			"Load CRM_ACTIVITY_OVERVIEW for Company Briefing",
+			buildCrmActivitySql(companyId, briefingPeriod),
 			signal,
 		);
 	}
@@ -1007,6 +1234,34 @@ export async function collectPlatformSignals(args: {
 	return {
 		platformSignals: [createJobofferActivityOverviewSignal(mapped.joboffers)],
 		notices,
+	};
+}
+
+export async function collectCrmSignals(args: {
+	companyId: string;
+	briefingPeriod: BriefingPeriod;
+	dataAccess: CompanyBriefingDataAccess;
+	signal?: AbortSignal;
+}): Promise<{ crmSignals: CrmSignal[]; notices: NoticeItem[] }> {
+	let rows: Record<string, unknown>[];
+	try {
+		rows = await args.dataAccess.getCrmActivityRows(args.companyId, args.briefingPeriod, args.signal);
+	} catch {
+		return {
+			crmSignals: [],
+			notices: [
+				crmWarning(
+					"CRM_SIGNALS_QUERY_FAILED",
+					"CRM Signals konnten nicht aus dem Company Briefing CRM Activity Modell geladen werden.",
+				),
+			],
+		};
+	}
+
+	const mapped = mapCrmActivityRows(rows);
+	return {
+		crmSignals: [createCrmActivityOverviewSignal(mapped.activities)],
+		notices: mapped.notices,
 	};
 }
 
@@ -1153,6 +1408,13 @@ export async function executeCompanyBriefing(
 		signal,
 	});
 	briefingNotices.push(...platformResult.notices);
+	const crmResult = await collectCrmSignals({
+		companyId: input.companyId,
+		briefingPeriod: period,
+		dataAccess: services.dataAccess,
+		signal,
+	});
+	briefingNotices.push(...crmResult.notices);
 
 	const briefing: CompanyBriefing = {
 		companyId: input.companyId,
@@ -1161,7 +1423,7 @@ export async function executeCompanyBriefing(
 		signalInterpretation: { summary: [], themes: [] },
 		salesOpportunities: [],
 		platformSignals: platformResult.platformSignals,
-		crmSignals: [],
+		crmSignals: crmResult.crmSignals,
 		notices: briefingNotices,
 	};
 	const markdown = renderCompanyBriefingMarkdown(briefing);
@@ -1208,6 +1470,12 @@ function findJobofferActivitySignal(
 ): PlatformSignal<JobofferActivityOverviewData> | undefined {
 	return briefing.platformSignals.find((signal) => signal.type === JOBOFFER_ACTIVITY_OVERVIEW_TYPE) as
 		| PlatformSignal<JobofferActivityOverviewData>
+		| undefined;
+}
+
+function findCrmActivitySignal(briefing: CompanyBriefing): CrmSignal<CrmActivityOverviewData> | undefined {
+	return briefing.crmSignals.find((signal) => signal.type === CRM_ACTIVITY_OVERVIEW_TYPE) as
+		| CrmSignal<CrmActivityOverviewData>
 		| undefined;
 }
 
@@ -1301,6 +1569,33 @@ function renderPlatformSignalsMarkdown(briefing: CompanyBriefing): string {
 		.join("\n\n");
 }
 
+function renderCrmActivityOverviewMarkdown(signal: CrmSignal<CrmActivityOverviewData>): string {
+	const lines = signal.facts.map((fact) => `• ${fact}`);
+	const activities = signal.data?.activities || [];
+	for (const activity of activities.slice(0, INLINE_CRM_ACTIVITY_LIMIT)) {
+		const detail = activity.detail ? `: ${sanitizeMarkdownText(activity.detail)}` : "";
+		lines.push(
+			`• ${formatDateTimeForMarkdown(activity.occurredAt)} *${formatCrmTypeLabel(activity.objectType)}* – ${sanitizeMarkdownText(activity.title)}${detail}`,
+		);
+	}
+	if (activities.length > INLINE_CRM_ACTIVITY_LIMIT) {
+		lines.push(`• ${activities.length - INLINE_CRM_ACTIVITY_LIMIT} weitere CRM Aktivitäten nicht inline angezeigt.`);
+	}
+	return lines.join("\n");
+}
+
+function renderCrmSignalsMarkdown(briefing: CompanyBriefing): string {
+	const period = briefing.briefingPeriod;
+	const periodLine = period.lastReachedCallAt
+		? `• Last Reached Call: ${formatDateTimeForMarkdown(period.lastReachedCallAt)}.`
+		: period.basis === "FALLBACK_60_DAYS"
+			? "• Briefing Period nutzt den 60-Tage-Fallback."
+			: "• Kein Last Reached Call gefunden.";
+	const activitySignal = findCrmActivitySignal(briefing);
+	if (!activitySignal) return `${periodLine}\n• CRM Signals sind nicht verfügbar.`;
+	return `${periodLine}\n\n*${activitySignal.title}*\n${renderCrmActivityOverviewMarkdown(activitySignal)}`;
+}
+
 function renderNoticesMarkdown(notices: NoticeItem[]): string {
 	if (notices.length === 0) return "• Keine Hinweise.";
 	return notices
@@ -1316,11 +1611,6 @@ export function renderCompanyBriefingMarkdown(briefing: CompanyBriefing): string
 			: period.basis === "EXPLICIT"
 				? "expliziter Zeitraum"
 				: "60-Tage-Fallback";
-	const crmSignals = period.lastReachedCallAt
-		? `• Last Reached Call: ${formatDateTimeForMarkdown(period.lastReachedCallAt)}.`
-		: period.basis === "FALLBACK_60_DAYS"
-			? "• Briefing Period nutzt den 60-Tage-Fallback."
-			: "• Kein Last Reached Call gefunden.";
 	return [
 		`*Company Briefing: ${sanitizeMarkdownText(briefing.companyName)}*`,
 		"*Briefing Period*",
@@ -1332,7 +1622,7 @@ export function renderCompanyBriefingMarkdown(briefing: CompanyBriefing): string
 		"*Platform Signals*",
 		renderPlatformSignalsMarkdown(briefing),
 		"*CRM Signals*",
-		crmSignals,
+		renderCrmSignalsMarkdown(briefing),
 		"*Hinweise / Datenlücken*",
 		renderNoticesMarkdown(briefing.notices),
 	].join("\n\n");

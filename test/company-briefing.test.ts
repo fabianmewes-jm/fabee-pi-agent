@@ -6,14 +6,17 @@ import {
 	type BookingInventoryFreshness,
 	type BriefingPeriod,
 	buildCompanyContextSql,
+	buildCrmActivitySql,
 	buildJobofferActivityOverviewSql,
 	type CompanyBriefing,
 	type CompanyBriefingDataAccess,
 	type CompanyContext,
 	type CompanyContextLookup,
 	createCompanyBriefingTool,
+	createCrmActivityOverviewSignal,
 	createJobofferActivityOverviewSignal,
 	executeCompanyBriefing,
+	mapCrmActivityRows,
 	mapJobofferActivityRows,
 	renderCompanyBriefingMarkdown,
 	validateCompanyBriefingArgs,
@@ -44,9 +47,11 @@ function dataAccess(
 		companyLookup?: CompanyContextLookup;
 		freshness?: BookingInventoryFreshness;
 		rows?: Record<string, unknown>[];
+		crmRows?: Record<string, unknown>[];
 		companyError?: Error;
 		freshnessError?: Error;
 		rowsError?: Error;
+		crmRowsError?: Error;
 	} = {},
 ): CompanyBriefingDataAccess {
 	return {
@@ -62,6 +67,10 @@ function dataAccess(
 		getJobofferActivityRows: vi.fn(async () => {
 			if (overrides.rowsError) throw overrides.rowsError;
 			return overrides.rows || [];
+		}),
+		getCrmActivityRows: vi.fn(async () => {
+			if (overrides.crmRowsError) throw overrides.crmRowsError;
+			return overrides.crmRows || [];
 		}),
 	};
 }
@@ -109,6 +118,29 @@ function sampleRows(): Record<string, unknown>[] {
 			newOtherHiresCount: 0,
 			isExpiring: true,
 			bookingEndsAt: "2026-06-25T08:00:00+00:00",
+		},
+	];
+}
+
+function sampleCrmRows(): Record<string, unknown>[] {
+	return [
+		{
+			objectType: "call",
+			objectId: "call-1",
+			occurredAt: "2026-06-20T10:00:00+00:00",
+			callTitle: "Follow-up Call",
+			callDirection: "OUTBOUND",
+			callStatus: "COMPLETED",
+			callSummary: "Kunde fragt nach Performance der laufenden Jobs.",
+			transcriptText: "Sales: Wie läuft es?\nKunde: Wir brauchen mehr Bewerbungen.",
+		},
+		{
+			objectType: "email",
+			objectId: "email-1",
+			occurredAt: "2026-06-18T09:00:00+00:00",
+			emailSubject: "Angebot Verlängerung",
+			emailDirection: "OUTGOING_EMAIL",
+			emailStatus: "SENT",
 		},
 	];
 }
@@ -194,6 +226,43 @@ describe("JOBOFFER_ACTIVITY_OVERVIEW query and mapping", () => {
 		expect(sql).not.toContain("changedInPeriod");
 	});
 
+	it("builds the CRM activity SQL against the materialized Company Briefing model", () => {
+		const sql = buildCrmActivitySql(COMPANY_ID, {
+			from: "2026-06-01T00:00:00.000Z",
+			to: "2026-06-23T12:00:00.000Z",
+			basis: "LAST_REACHED_CALL",
+			lastReachedCallAt: "2026-06-01T00:00:00.000Z",
+		});
+
+		expect(sql).toContain("{{ ref('90_hubspot__fct_company_briefing_crm_activity') }}");
+		expect(sql).toContain(`'${COMPANY_ID}'::text as company_id`);
+		expect(sql).toContain("crm.occurred_at >= p.period_from");
+		expect(sql).toContain("crm.occurred_at < p.period_to");
+		expect(sql).toContain('left(crm.transcript_text, 1000) as "transcriptText"');
+	});
+
+	it("normalizes CRM activity rows", () => {
+		const mapped = mapCrmActivityRows([
+			...sampleCrmRows(),
+			{ objectType: "note", objectId: "note-1", occurredAt: "bad", noteBody: "ignored" },
+		]);
+
+		expect(mapped.activities).toHaveLength(2);
+		expect(mapped.activities[0]).toMatchObject({
+			objectType: "call",
+			objectId: "call-1",
+			occurredAt: "2026-06-20T10:00:00.000Z",
+			title: "Follow-up Call",
+			detail: expect.stringContaining("Kunde fragt"),
+			transcriptExcerpt: expect.stringContaining("Wir brauchen mehr Bewerbungen"),
+		});
+		expect(createCrmActivityOverviewSignal(mapped.activities)).toMatchObject({
+			type: "CRM_ACTIVITY_OVERVIEW",
+			data: { countsByType: { call: 1, email: 1 } },
+		});
+		expect(mapped.notices.map((notice) => notice.code)).toContain("UNEXPECTED_INVALID_CRM_ACTIVITY_ROW");
+	});
+
 	it("normalizes schema fields and applies nullability/fallback rules", () => {
 		const mapped = mapJobofferActivityRows([
 			{
@@ -263,10 +332,10 @@ describe("JOBOFFER_ACTIVITY_OVERVIEW query and mapping", () => {
 });
 
 describe("company_briefing execution", () => {
-	it("builds a briefing with joboffer activity and stale-inventory warning", async () => {
+	it("builds a briefing with joboffer activity, CRM activity, and stale-inventory warning", async () => {
 		const response = await executeCompanyBriefing(
 			{ companyId: COMPANY_ID },
-			servicesFor({ freshness: { maxActiveDate: "2026-06-22" }, rows: sampleRows() }),
+			servicesFor({ freshness: { maxActiveDate: "2026-06-22" }, rows: sampleRows(), crmRows: sampleCrmRows() }),
 		);
 
 		expect(response.status).toBe("OK_WITH_WARNINGS");
@@ -275,8 +344,11 @@ describe("company_briefing execution", () => {
 			type: "JOBOFFER_ACTIVITY_OVERVIEW",
 			data: { joboffers: expect.arrayContaining([expect.objectContaining({ jobofferId: "job-1" })]) },
 		});
+		expect(response.briefing?.crmSignals).toEqual([expect.objectContaining({ type: "CRM_ACTIVITY_OVERVIEW" })]);
 		expect(response.markdown).toContain("*Company Briefing: Acme GmbH*");
 		expect(response.markdown).toContain("Pflegefachkraft");
+		expect(response.markdown).toContain("*CRM Aktivitätsübersicht*");
+		expect(response.markdown).toContain("Follow-up Call");
 		expect(response.notices.map((notice) => notice.code)).toContain("BOOKING_INVENTORY_STALE");
 	});
 

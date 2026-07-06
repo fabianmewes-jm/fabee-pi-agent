@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.29
+
+- Added fabee-log-api-read route
+
 ## 0.1.28
 
 - Improve Company Briefing Slack formatting and Paid/Freemium signals

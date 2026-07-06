@@ -1,6 +1,6 @@
 {
 	"name": "@fabianmewes-jm/fabee-pi-agent",
-	"version": "0.1.28",
+	"version": "0.1.29",
 	"description": "Bee Dance speaking Unix socket agent runtime derived in part from pi-mom",
 	"type": "module",
 	"bin": {

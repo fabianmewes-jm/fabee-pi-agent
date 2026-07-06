@@ -344,6 +344,53 @@ spec:
               readOnly: true
             - name: worker-socket
               mountPath: {{ .Values.transport.socketDir }}
+        {{- if .Values.logReadApi.enabled }}
+        - name: fabee-log-read-api
+          image: {{ printf "%s:%s" .Values.logReadApi.image.repository .Values.logReadApi.image.tag }}
+          imagePullPolicy: {{ .Values.logReadApi.image.pullPolicy }}
+          env:
+            - name: READ_API_HOST
+              value: "0.0.0.0"
+            - name: READ_API_PORT
+              value: {{ .Values.logReadApi.port | quote }}
+            - name: READ_API_RUN_LOG_DIR
+              value: {{ printf "%s/.fabee-pi-agent/logs" .Values.workspace.mountPath | quote }}
+            - name: READ_API_SESSION_DIR
+              value: {{ printf "%s/.fabee-pi-agent/sessions" .Values.workspace.mountPath | quote }}
+            - name: READ_API_BEARER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "logReadApi.bearerTokenSecretName is required when logReadApi.enabled=true" .Values.logReadApi.bearerTokenSecretName }}
+                  key: {{ .Values.logReadApi.bearerTokenSecretKey }}
+          ports:
+            - name: log-read-api
+              containerPort: {{ .Values.logReadApi.port }}
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: log-read-api
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: log-read-api
+          securityContext:
+            runAsUser: {{ .Values.container.runAsUser }}
+            runAsGroup: {{ .Values.container.runAsGroup }}
+            runAsNonRoot: {{ .Values.container.runAsNonRoot }}
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: {{ .Values.container.readOnlyRootFilesystem }}
+            capabilities:
+              drop:
+                - ALL
+          {{- with .Values.logReadApi.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: workspace
+              mountPath: {{ .Values.workspace.mountPath }}
+        {{- end }}
       volumes:
         - name: worker-socket
           emptyDir: {}

@@ -540,6 +540,58 @@ describe("company_briefing Markdown rendering", () => {
 		expect(markdown).toContain("1 weitere active Paid Joboffers ohne New Bewerbungen/New Hires");
 	});
 
+	it("summarizes CRM activity instead of rendering an inline timeline", () => {
+		const briefingPeriod: BriefingPeriod = {
+			from: "2026-06-01T08:00:00.000Z",
+			to: "2026-06-23T12:00:00.000Z",
+			basis: "LAST_REACHED_CALL",
+			lastReachedCallAt: "2026-06-01T08:00:00.000Z",
+		};
+		const olderEmails = Array.from({ length: 6 }, (_, index) => ({
+			objectType: "email",
+			objectId: `older-email-${index + 1}`,
+			occurredAt: `2026-06-${String(17 - index).padStart(2, "0")}T09:00:00+00:00`,
+			emailSubject: `Older Email ${index + 1}`,
+			emailDirection: "OUTGOING_EMAIL",
+			emailStatus: "SENT",
+		}));
+		const activities = mapCrmActivityRows([
+			{
+				objectType: "email",
+				objectId: "latest-email",
+				occurredAt: "2026-06-22T09:00:00+00:00",
+				emailSubject: "Latest CRM Email",
+				emailDirection: "OUTGOING_EMAIL",
+				emailStatus: "SENT",
+			},
+			...sampleCrmRows(),
+			...olderEmails,
+		]).activities;
+		const briefing: CompanyBriefing = {
+			companyId: COMPANY_ID,
+			companyName: "Acme GmbH",
+			briefingPeriod,
+			signalInterpretation: { summary: [], themes: [] },
+			salesOpportunities: [],
+			platformSignals: [],
+			crmSignals: [createCrmActivityOverviewSignal(activities)],
+			notices: [],
+		};
+
+		const markdown = renderCompanyBriefingMarkdown(briefing);
+
+		expect(markdown).toContain("In der Briefing Period wurden 9 CRM Aktivitäten erfasst.");
+		expect(markdown).toContain("Der Schwerpunkt lag auf Email");
+		expect(markdown).toContain("Dokumentierter Kontext:");
+		expect(markdown).toContain("Genannte Themen:");
+		expect(markdown).toContain("Latest CRM Email");
+		expect(markdown).toContain("Follow-up Call");
+		expect(markdown).not.toContain("Letzte Aktivität:");
+		expect(markdown).not.toContain("Neueste Aktivität je Typ:");
+		expect(markdown).not.toContain("Older Email 5");
+		expect(markdown).not.toContain("weitere CRM Aktivitäten nicht inline angezeigt");
+	});
+
 	it("keeps only the first five active detail rows inline", () => {
 		const briefingPeriod: BriefingPeriod = {
 			from: "2026-06-01T08:00:00.000Z",

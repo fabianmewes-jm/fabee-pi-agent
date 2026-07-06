@@ -17,7 +17,6 @@ const MAX_LAST_REACHED_CALL_AGE_DAYS = 180;
 const DEFAULT_QUERY_TIMEOUT_SECONDS = 45;
 const DEFAULT_QUERY_LIMIT = 1000;
 const INLINE_JOBOFFER_DETAIL_LIMIT = 5;
-const INLINE_CRM_ACTIVITY_LIMIT = 5;
 
 const companyBriefingSchema = Type.Object(
 	{
@@ -1569,19 +1568,44 @@ function renderPlatformSignalsMarkdown(briefing: CompanyBriefing): string {
 		.join("\n\n");
 }
 
+function uniqueCompact(values: Array<string | null | undefined>): string[] {
+	return [...new Set(values.map((value) => (value ? sanitizeMarkdownText(value) : "")).filter(Boolean))];
+}
+
+function describeCrmActivityMix(countsByType: Record<string, number>): string {
+	const entries = Object.entries(countsByType)
+		.filter(([, count]) => count > 0)
+		.sort(([, leftCount], [, rightCount]) => rightCount - leftCount);
+	if (entries.length === 0) return "";
+	const topCount = entries[0][1];
+	const topTypes = entries.filter(([, count]) => count === topCount).map(([type]) => formatCrmTypeLabel(type));
+	const otherTypes = entries.filter(([, count]) => count !== topCount).map(([type]) => formatCrmTypeLabel(type));
+	if (otherTypes.length === 0) return `Alle erfassten Aktivitäten waren ${topTypes.join("/")}.`;
+	return `Der Schwerpunkt lag auf ${topTypes.join("/")}; weitere Aktivitäten kamen aus ${otherTypes.join(", ")}.`;
+}
+
 function renderCrmActivityOverviewMarkdown(signal: CrmSignal<CrmActivityOverviewData>): string {
-	const lines = signal.facts.map((fact) => `• ${fact}`);
 	const activities = signal.data?.activities || [];
-	for (const activity of activities.slice(0, INLINE_CRM_ACTIVITY_LIMIT)) {
-		const detail = activity.detail ? `: ${sanitizeMarkdownText(activity.detail)}` : "";
-		lines.push(
-			`• ${formatDateTimeForMarkdown(activity.occurredAt)} *${formatCrmTypeLabel(activity.objectType)}* – ${sanitizeMarkdownText(activity.title)}${detail}`,
-		);
+	if (activities.length === 0) return "Keine CRM Aktivitäten in der Briefing Period gefunden.";
+
+	const countsByType = signal.data?.countsByType || {};
+	const sentences = [`In der Briefing Period wurden ${activities.length} CRM Aktivitäten erfasst.`];
+	const mix = describeCrmActivityMix(countsByType);
+	if (mix) sentences.push(mix);
+
+	const documentedContext = uniqueCompact(
+		activities
+			.filter((activity) => ["call", "note"].includes(activity.objectType))
+			.map((activity) => activity.detail || activity.transcriptExcerpt),
+	).slice(0, 3);
+	if (documentedContext.length > 0) {
+		sentences.push(`Dokumentierter Kontext: ${documentedContext.join("; ")}.`);
 	}
-	if (activities.length > INLINE_CRM_ACTIVITY_LIMIT) {
-		lines.push(`• ${activities.length - INLINE_CRM_ACTIVITY_LIMIT} weitere CRM Aktivitäten nicht inline angezeigt.`);
-	}
-	return lines.join("\n");
+
+	const topics = uniqueCompact(activities.map((activity) => activity.title)).slice(0, 4);
+	if (topics.length > 0) sentences.push(`Genannte Themen: ${topics.join("; ")}.`);
+
+	return sentences.join(" ");
 }
 
 function renderCrmSignalsMarkdown(briefing: CompanyBriefing): string {

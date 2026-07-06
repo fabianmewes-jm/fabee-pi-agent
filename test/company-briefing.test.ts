@@ -6,14 +6,17 @@ import {
 	type BookingInventoryFreshness,
 	type BriefingPeriod,
 	buildCompanyContextSql,
+	buildCrmActivitySql,
 	buildJobofferActivityOverviewSql,
 	type CompanyBriefing,
 	type CompanyBriefingDataAccess,
 	type CompanyContext,
 	type CompanyContextLookup,
 	createCompanyBriefingTool,
+	createCrmActivityOverviewSignal,
 	createJobofferActivityOverviewSignal,
 	executeCompanyBriefing,
+	mapCrmActivityRows,
 	mapJobofferActivityRows,
 	renderCompanyBriefingMarkdown,
 	validateCompanyBriefingArgs,
@@ -44,9 +47,11 @@ function dataAccess(
 		companyLookup?: CompanyContextLookup;
 		freshness?: BookingInventoryFreshness;
 		rows?: Record<string, unknown>[];
+		crmRows?: Record<string, unknown>[];
 		companyError?: Error;
 		freshnessError?: Error;
 		rowsError?: Error;
+		crmRowsError?: Error;
 	} = {},
 ): CompanyBriefingDataAccess {
 	return {
@@ -62,6 +67,10 @@ function dataAccess(
 		getJobofferActivityRows: vi.fn(async () => {
 			if (overrides.rowsError) throw overrides.rowsError;
 			return overrides.rows || [];
+		}),
+		getCrmActivityRows: vi.fn(async () => {
+			if (overrides.crmRowsError) throw overrides.crmRowsError;
+			return overrides.crmRows || [];
 		}),
 	};
 }
@@ -109,6 +118,29 @@ function sampleRows(): Record<string, unknown>[] {
 			newOtherHiresCount: 0,
 			isExpiring: true,
 			bookingEndsAt: "2026-06-25T08:00:00+00:00",
+		},
+	];
+}
+
+function sampleCrmRows(): Record<string, unknown>[] {
+	return [
+		{
+			objectType: "call",
+			objectId: "call-1",
+			occurredAt: "2026-06-20T10:00:00+00:00",
+			callTitle: "Follow-up Call",
+			callDirection: "OUTBOUND",
+			callStatus: "COMPLETED",
+			callSummary: "Kunde fragt nach Performance der laufenden Jobs.",
+			transcriptText: "Sales: Wie läuft es?\nKunde: Wir brauchen mehr Bewerbungen.",
+		},
+		{
+			objectType: "email",
+			objectId: "email-1",
+			occurredAt: "2026-06-18T09:00:00+00:00",
+			emailSubject: "Angebot Verlängerung",
+			emailDirection: "OUTGOING_EMAIL",
+			emailStatus: "SENT",
 		},
 	];
 }
@@ -194,6 +226,42 @@ describe("JOBOFFER_ACTIVITY_OVERVIEW query and mapping", () => {
 		expect(sql).not.toContain("changedInPeriod");
 	});
 
+	it("builds the CRM activity SQL against the materialized Company Briefing model", () => {
+		const sql = buildCrmActivitySql(COMPANY_ID, {
+			from: "2026-06-01T00:00:00.000Z",
+			to: "2026-06-23T12:00:00.000Z",
+			basis: "LAST_REACHED_CALL",
+			lastReachedCallAt: "2026-06-01T00:00:00.000Z",
+		});
+
+		expect(sql).toContain("{{ ref('90_hubspot__fct_company_briefing_crm_activity') }}");
+		expect(sql).toContain(`'${COMPANY_ID}'::text as company_id`);
+		expect(sql).toContain("crm.occurred_at >= p.period_from");
+		expect(sql).toContain("crm.occurred_at < p.period_to");
+		expect(sql).toContain('left(crm.transcript_text, 1000) as "transcriptText"');
+	});
+
+	it("normalizes CRM activity rows", () => {
+		const mapped = mapCrmActivityRows([
+			...sampleCrmRows(),
+			{ objectType: "note", objectId: "note-1", occurredAt: "bad", noteBody: "ignored" },
+		]);
+
+		expect(mapped.activities).toHaveLength(2);
+		expect(mapped.activities[0]).toMatchObject({
+			objectType: "call",
+			objectId: "call-1",
+			occurredAt: "2026-06-20T10:00:00.000Z",
+			title: "Follow-up Call",
+			detail: expect.stringContaining("Kunde fragt"),
+		});
+		expect(createCrmActivityOverviewSignal(mapped.activities)).toMatchObject({
+			type: "CRM_ACTIVITY_OVERVIEW",
+			data: { countsByType: { call: 1, email: 1 } },
+		});
+		expect(mapped.notices.map((notice) => notice.code)).toContain("UNEXPECTED_INVALID_CRM_ACTIVITY_ROW");
+	});
+
 	it("normalizes schema fields and applies nullability/fallback rules", () => {
 		const mapped = mapJobofferActivityRows([
 			{
@@ -263,10 +331,10 @@ describe("JOBOFFER_ACTIVITY_OVERVIEW query and mapping", () => {
 });
 
 describe("company_briefing execution", () => {
-	it("builds a briefing with joboffer activity and stale-inventory warning", async () => {
+	it("builds a briefing with joboffer activity, CRM activity, and stale-inventory warning", async () => {
 		const response = await executeCompanyBriefing(
 			{ companyId: COMPANY_ID },
-			servicesFor({ freshness: { maxActiveDate: "2026-06-22" }, rows: sampleRows() }),
+			servicesFor({ freshness: { maxActiveDate: "2026-06-22" }, rows: sampleRows(), crmRows: sampleCrmRows() }),
 		);
 
 		expect(response.status).toBe("OK_WITH_WARNINGS");
@@ -275,8 +343,11 @@ describe("company_briefing execution", () => {
 			type: "JOBOFFER_ACTIVITY_OVERVIEW",
 			data: { joboffers: expect.arrayContaining([expect.objectContaining({ jobofferId: "job-1" })]) },
 		});
+		expect(response.briefing?.crmSignals).toEqual([expect.objectContaining({ type: "CRM_ACTIVITY_OVERVIEW" })]);
 		expect(response.markdown).toContain("*Company Briefing: Acme GmbH*");
 		expect(response.markdown).toContain("Pflegefachkraft");
+		expect(response.markdown).toContain("*CRM Aktivitätsübersicht*");
+		expect(response.markdown).toContain("Kunde fragt nach Performance");
 		expect(response.notices.map((notice) => notice.code)).toContain("BOOKING_INVENTORY_STALE");
 	});
 
@@ -308,6 +379,34 @@ describe("company_briefing execution", () => {
 
 		expect(response.status).toBe("OK");
 		expect(response.markdown).toContain("*Company Briefing: Acme GmbH*");
+	});
+
+	it("falls back to 60 days when the last reached call is older than 180 days", async () => {
+		const oldCallAt = "2025-12-01T08:00:00.000Z";
+		const fallbackFrom = new Date(NOW.getTime() - 60 * 24 * 60 * 60 * 1000).toISOString();
+		const access = dataAccess({
+			companyLookup: { status: "found", company: companyContext({ lastReachedCallAt: oldCallAt }) },
+		});
+
+		const response = await executeCompanyBriefing(
+			{ companyId: COMPANY_ID },
+			{ dataAccess: access, now: () => NOW, requestIdFactory: () => "request-1" },
+		);
+
+		expect(response.status).toBe("OK_WITH_WARNINGS");
+		expect(response.briefing?.briefingPeriod).toMatchObject({
+			from: fallbackFrom,
+			to: NOW.toISOString(),
+			basis: "FALLBACK_60_DAYS",
+			lastReachedCallAt: null,
+		});
+		expect(response.notices.map((notice) => notice.code)).toContain("LAST_REACHED_CALL_TOO_OLD");
+		expect(response.markdown).toContain("Briefing Period nutzt den 60-Tage-Fallback");
+		expect(access.getJobofferActivityRows).toHaveBeenCalledWith(
+			COMPANY_ID,
+			expect.objectContaining({ from: fallbackFrom, basis: "FALLBACK_60_DAYS" }),
+			undefined,
+		);
 	});
 
 	it("uses explicit periodFrom and defaults periodTo to now", async () => {
@@ -438,6 +537,58 @@ describe("company_briefing Markdown rendering", () => {
 			expect(markdown).toContain(`*${heading}*`);
 		}
 		expect(markdown).toContain("1 weitere active Paid Joboffers ohne New Bewerbungen/New Hires");
+	});
+
+	it("summarizes CRM activity instead of rendering an inline timeline", () => {
+		const briefingPeriod: BriefingPeriod = {
+			from: "2026-06-01T08:00:00.000Z",
+			to: "2026-06-23T12:00:00.000Z",
+			basis: "LAST_REACHED_CALL",
+			lastReachedCallAt: "2026-06-01T08:00:00.000Z",
+		};
+		const olderEmails = Array.from({ length: 2 }, (_, index) => ({
+			objectType: "email",
+			objectId: `older-email-${index + 1}`,
+			occurredAt: `2026-06-${String(17 - index).padStart(2, "0")}T09:00:00+00:00`,
+			emailSubject: `Older Email ${index + 1}`,
+			emailDirection: "OUTGOING_EMAIL",
+			emailStatus: "SENT",
+		}));
+		const activities = mapCrmActivityRows([
+			{
+				objectType: "email",
+				objectId: "latest-email",
+				occurredAt: "2026-06-22T09:00:00+00:00",
+				emailSubject: "Latest CRM Email",
+				emailDirection: "OUTGOING_EMAIL",
+				emailStatus: "SENT",
+			},
+			...sampleCrmRows(),
+			...olderEmails,
+		]).activities;
+		const briefing: CompanyBriefing = {
+			companyId: COMPANY_ID,
+			companyName: "Acme GmbH",
+			briefingPeriod,
+			signalInterpretation: { summary: [], themes: [] },
+			salesOpportunities: [],
+			platformSignals: [],
+			crmSignals: [createCrmActivityOverviewSignal(activities)],
+			notices: [],
+		};
+
+		const markdown = renderCompanyBriefingMarkdown(briefing);
+
+		expect(markdown).toContain("In der Briefing Period wurden 5 CRM Aktivitäten erfasst.");
+		expect(markdown).toContain("Der Schwerpunkt lag auf Email");
+		expect(markdown).toContain("CRM-Kontext:");
+		expect(markdown).toContain("Kunde fragt nach Performance");
+		expect(markdown).not.toContain("Latest CRM Email");
+		expect(markdown).not.toContain("Follow-up Call");
+		expect(markdown).not.toContain("Letzte Aktivität:");
+		expect(markdown).not.toContain("Neueste Aktivität je Typ:");
+		expect(markdown).not.toContain("Older Email 1");
+		expect(markdown).not.toContain("weitere CRM Aktivitäten nicht inline angezeigt");
 	});
 
 	it("keeps only the first five active detail rows inline", () => {

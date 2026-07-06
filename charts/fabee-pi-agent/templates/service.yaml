@@ -1,4 +1,4 @@
-{{- if .Values.service.enabled }}
+{{- if .Values.logReadApi.enabled }}
 apiVersion: v1
 kind: Service
 metadata:
@@ -7,5 +7,9 @@ metadata:
 spec:
   selector:
     app.kubernetes.io/name: {{ include "fabee-pi-agent.name" . }}
-  ports: []
+  ports:
+    - name: log-read-api
+      port: {{ .Values.logReadApi.port }}
+      targetPort: log-read-api
+      protocol: TCP
 {{- end }}

@@ -174,7 +174,12 @@ The chart deploys:
 
 - one `bee-pi-agent` container
 - one `bee-worker-sidecar` container
+- optional `fabee-log-exporter` and `fabee-log-read-api` sidecars
 - one shared socket volume mounted at `/var/run/bee`
+
+`logReadApi` is disabled by default. When enabled it mounts the shared workspace,
+serves `/health` plus the read API on the configured port, and expects
+`logReadApi.bearerTokenSecretName` / `logReadApi.bearerTokenSecretKey` for auth.
 
 It also supports the same workspace, auth, and git bootstrap patterns that were
 used in the earlier `pi-agent-worker` deployment.

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.28
+
+- Improve Company Briefing Slack formatting and Paid/Freemium signals
+
 ## 0.1.27
 
 - feat(company-briefing): improve CSV period handling

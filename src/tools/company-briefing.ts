@@ -113,7 +113,6 @@ export interface CrmActivityItem {
 	occurredAt: string;
 	title: string;
 	detail: string | null;
-	transcriptExcerpt: string | null;
 }
 
 export interface CrmActivityOverviewData {
@@ -635,42 +634,13 @@ function createCrmActivityTitle(row: Record<string, unknown>, objectType: string
 	return title || `${formatCrmTypeLabel(objectType)} ${objectId}`;
 }
 
-function compactParts(...parts: Array<string | null>): string | null {
-	const compacted = parts.filter((part): part is string => Boolean(part));
-	return compacted.length > 0 ? compacted.join(", ") : null;
-}
-
 function createCrmActivityDetail(row: Record<string, unknown>, objectType: string): string | null {
-	const transcriptExcerpt = truncateText(getStringValue(row, "transcriptText", "transcript_text"), 180);
 	switch (objectType) {
 		case "call":
-			return compactParts(
-				getStringValue(row, "callDirection", "call_direction"),
-				getStringValue(row, "callStatus", "call_status"),
-				getStringValue(row, "callDisposition", "call_disposition"),
-				truncateText(getStringValue(row, "callSummary", "call_summary"), 180) || transcriptExcerpt,
+			return (
+				truncateText(getStringValue(row, "callSummary", "call_summary"), 180) ||
+				truncateText(getStringValue(row, "transcriptText", "transcript_text"), 180)
 			);
-		case "email":
-			return compactParts(
-				getStringValue(row, "emailDirection", "email_direction"),
-				getStringValue(row, "emailStatus", "email_status"),
-				getStringValue(row, "emailFromEmail", "email_from_email"),
-				getStringValue(row, "emailToEmail", "email_to_email"),
-			);
-		case "deal":
-			return compactParts(
-				getStringValue(row, "dealStage", "deal_stage"),
-				getStringValue(row, "dealPipeline", "deal_pipeline"),
-				getStringValue(row, "dealAmountRaw", "deal_amount_raw"),
-			);
-		case "task":
-			return compactParts(
-				getStringValue(row, "taskStatus", "task_status"),
-				getStringValue(row, "taskPriority", "task_priority"),
-				getStringValue(row, "taskType", "task_type"),
-			);
-		case "meeting":
-			return compactParts(getStringValue(row, "meetingOutcome", "meeting_outcome"));
 		case "note":
 			return truncateText(getStringValue(row, "noteBody", "note_body"), 180);
 		default:
@@ -705,7 +675,6 @@ export function mapCrmActivityRows(rows: Record<string, unknown>[]): {
 			occurredAt,
 			title: createCrmActivityTitle(row, objectType, objectId),
 			detail: createCrmActivityDetail(row, objectType),
-			transcriptExcerpt: truncateText(getStringValue(row, "transcriptText", "transcript_text"), 240),
 		});
 	}
 
@@ -717,14 +686,10 @@ export function createCrmActivityOverviewSignal(activities: CrmActivityItem[]): 
 		counts[activity.objectType] = (counts[activity.objectType] || 0) + 1;
 		return counts;
 	}, {});
-	const countSummary = Object.entries(countsByType)
-		.sort(([left], [right]) => left.localeCompare(right))
-		.map(([type, count]) => `${formatCrmTypeLabel(type)}: ${count}`)
-		.join(", ");
 	const facts = [
 		activities.length === 0
 			? "Keine CRM Aktivitäten in der Briefing Period gefunden."
-			: `${activities.length} CRM Aktivitäten in der Briefing Period gefunden (${countSummary}).`,
+			: `${activities.length} CRM Aktivitäten in der Briefing Period gefunden.`,
 	];
 
 	return {
@@ -1051,28 +1016,13 @@ select
     crm.object_id as "objectId",
     crm.occurred_at as "occurredAt",
     crm.deal_name as "dealName",
-    crm.deal_pipeline as "dealPipeline",
-    crm.deal_stage as "dealStage",
-    crm.deal_amount_raw as "dealAmountRaw",
     crm.task_subject as "taskSubject",
-    crm.task_status as "taskStatus",
-    crm.task_priority as "taskPriority",
-    crm.task_type as "taskType",
     left(crm.note_body, 1000) as "noteBody",
     crm.call_title as "callTitle",
-    crm.call_direction as "callDirection",
-    crm.call_status as "callStatus",
-    crm.call_disposition as "callDisposition",
     left(crm.call_summary, 1000) as "callSummary",
-    crm.has_transcript as "hasTranscript",
     left(crm.transcript_text, 1000) as "transcriptText",
     crm.email_subject as "emailSubject",
-    crm.email_direction as "emailDirection",
-    crm.email_status as "emailStatus",
-    crm.email_from_email as "emailFromEmail",
-    crm.email_to_email as "emailToEmail",
-    crm.meeting_title as "meetingTitle",
-    crm.meeting_outcome as "meetingOutcome"
+    crm.meeting_title as "meetingTitle"
 from {{ ref('90_hubspot__fct_company_briefing_crm_activity') }} crm
 inner join params p
     on crm.company_id = p.company_id
@@ -1593,17 +1543,8 @@ function renderCrmActivityOverviewMarkdown(signal: CrmSignal<CrmActivityOverview
 	const mix = describeCrmActivityMix(countsByType);
 	if (mix) sentences.push(mix);
 
-	const documentedContext = uniqueCompact(
-		activities
-			.filter((activity) => ["call", "note"].includes(activity.objectType))
-			.map((activity) => activity.detail || activity.transcriptExcerpt),
-	).slice(0, 3);
-	if (documentedContext.length > 0) {
-		sentences.push(`Dokumentierter Kontext: ${documentedContext.join("; ")}.`);
-	}
-
-	const topics = uniqueCompact(activities.map((activity) => activity.title)).slice(0, 4);
-	if (topics.length > 0) sentences.push(`Genannte Themen: ${topics.join("; ")}.`);
+	const context = uniqueCompact(activities.map((activity) => activity.detail)).slice(0, 2);
+	if (context.length > 0) sentences.push(`CRM-Kontext: ${context.join("; ").replace(/[.!?]+$/, "")}.`);
 
 	return sentences.join(" ");
 }

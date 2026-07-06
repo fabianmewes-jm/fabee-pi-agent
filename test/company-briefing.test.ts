@@ -254,7 +254,6 @@ describe("JOBOFFER_ACTIVITY_OVERVIEW query and mapping", () => {
 			occurredAt: "2026-06-20T10:00:00.000Z",
 			title: "Follow-up Call",
 			detail: expect.stringContaining("Kunde fragt"),
-			transcriptExcerpt: expect.stringContaining("Wir brauchen mehr Bewerbungen"),
 		});
 		expect(createCrmActivityOverviewSignal(mapped.activities)).toMatchObject({
 			type: "CRM_ACTIVITY_OVERVIEW",
@@ -348,7 +347,7 @@ describe("company_briefing execution", () => {
 		expect(response.markdown).toContain("*Company Briefing: Acme GmbH*");
 		expect(response.markdown).toContain("Pflegefachkraft");
 		expect(response.markdown).toContain("*CRM Aktivitätsübersicht*");
-		expect(response.markdown).toContain("Follow-up Call");
+		expect(response.markdown).toContain("Kunde fragt nach Performance");
 		expect(response.notices.map((notice) => notice.code)).toContain("BOOKING_INVENTORY_STALE");
 	});
 
@@ -547,7 +546,7 @@ describe("company_briefing Markdown rendering", () => {
 			basis: "LAST_REACHED_CALL",
 			lastReachedCallAt: "2026-06-01T08:00:00.000Z",
 		};
-		const olderEmails = Array.from({ length: 6 }, (_, index) => ({
+		const olderEmails = Array.from({ length: 2 }, (_, index) => ({
 			objectType: "email",
 			objectId: `older-email-${index + 1}`,
 			occurredAt: `2026-06-${String(17 - index).padStart(2, "0")}T09:00:00+00:00`,
@@ -580,15 +579,15 @@ describe("company_briefing Markdown rendering", () => {
 
 		const markdown = renderCompanyBriefingMarkdown(briefing);
 
-		expect(markdown).toContain("In der Briefing Period wurden 9 CRM Aktivitäten erfasst.");
+		expect(markdown).toContain("In der Briefing Period wurden 5 CRM Aktivitäten erfasst.");
 		expect(markdown).toContain("Der Schwerpunkt lag auf Email");
-		expect(markdown).toContain("Dokumentierter Kontext:");
-		expect(markdown).toContain("Genannte Themen:");
-		expect(markdown).toContain("Latest CRM Email");
-		expect(markdown).toContain("Follow-up Call");
+		expect(markdown).toContain("CRM-Kontext:");
+		expect(markdown).toContain("Kunde fragt nach Performance");
+		expect(markdown).not.toContain("Latest CRM Email");
+		expect(markdown).not.toContain("Follow-up Call");
 		expect(markdown).not.toContain("Letzte Aktivität:");
 		expect(markdown).not.toContain("Neueste Aktivität je Typ:");
-		expect(markdown).not.toContain("Older Email 5");
+		expect(markdown).not.toContain("Older Email 1");
 		expect(markdown).not.toContain("weitere CRM Aktivitäten nicht inline angezeigt");
 	});
 

@@ -32,6 +32,7 @@ interface ActiveTurnState {
 	sessionId: string;
 	threadId?: string;
 	turnId: string;
+	transport?: string;
 	controller: AbortController;
 	updatedAt: string;
 	cancelRequested: boolean;
@@ -162,6 +163,7 @@ export function createWorkerBeePeer(
 			sessionId: request.sessionId,
 			threadId: request.threadId,
 			turnId: request.turnId || runId,
+			transport: request.conversation.transport,
 			controller: new AbortController(),
 			updatedAt: new Date().toISOString(),
 			cancelRequested: false,
@@ -387,6 +389,27 @@ function mapEventToBeeEnvelopes(
 					},
 				}),
 			];
+		case "tool.started":
+			return activeRun.transport === "web"
+				? [
+						createItemEventEnvelope(activeRun, requester, "item.appended", {
+							eventType: "item.appended",
+							item: createStatusItem(`Tool gestartet: ${event.label || event.toolName}`),
+						}),
+					]
+				: [];
+		case "tool.completed":
+			return activeRun.transport === "web"
+				? [
+						createItemEventEnvelope(activeRun, requester, "item.appended", {
+							eventType: "item.appended",
+							item: createStatusItem(
+								`Tool beendet: ${event.label || event.toolName}`,
+								event.success ? "info" : "warning",
+							),
+						}),
+					]
+				: [];
 		default:
 			return [];
 	}
@@ -452,6 +475,15 @@ function createTextItem(itemId: string, kind: "message" | "thinking", text: stri
 		kind,
 		role: "assistant",
 		parts: [{ kind: "text", text }],
+	};
+}
+
+function createStatusItem(status: string, level: "info" | "warning" | "error" = "info"): Item {
+	return {
+		id: `item_${randomUUID()}`,
+		kind: "status",
+		role: "assistant",
+		parts: [{ kind: "status", status, level }],
 	};
 }
 

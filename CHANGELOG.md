@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.30
+
+- emit tool status events
+
 ## 0.1.29
 
 - Added fabee-log-api-read route

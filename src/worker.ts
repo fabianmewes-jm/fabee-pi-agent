@@ -32,8 +32,8 @@ const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-5";
 const DEFAULT_OPENAI_PROVIDER = "openai";
 const DEFAULT_OPENAI_MODEL = "gpt-5.5";
 const DEFAULT_OPENAI_CODEX_PROVIDER = "openai-codex";
-const DEFAULT_OPENAI_CODEX_MODEL = "gpt-5.5";
-const DEFAULT_THINKING_LEVEL: ThinkingLevel = "off";
+const DEFAULT_OPENAI_CODEX_MODEL = "gpt-5.6-sol";
+const DEFAULT_THINKING_LEVEL: ThinkingLevel = "medium";
 const THINKING_LEVELS = new Set<ThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh"]);
 
 const IMAGE_MIME_TYPES: Record<string, string> = {

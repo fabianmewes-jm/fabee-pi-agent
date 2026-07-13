@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.31
+
+- switch the default OpenAI Codex model to GPT-5.6 Sol with medium reasoning
+- provide the Company Briefing tool output in German
+
 ## 0.1.30
 
 - emit tool status events

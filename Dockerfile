@@ -45,6 +45,7 @@ COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/README.md ./README.md
 COPY --from=build /app/UPSTREAM.md ./UPSTREAM.md
+COPY --from=build /app/assets ./assets
 COPY --from=build /app/charts ./charts
 
 RUN mkdir -p /home/app /workspace /var/run/bee && chown -R 10001:10001 /home/app /workspace /var/run/bee /app

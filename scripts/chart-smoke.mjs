@@ -40,8 +40,8 @@ const result = await tool.execute("chart-smoke", {
 	},
 	outputName: "applications-2026-by-month.png",
 	title: "Applications 2026 by month",
-	width: 1000,
-	height: 550,
+	width: 1920,
+	height: 1080,
 });
 
 const png = await readFile(result.details.outputPath);

@@ -1,36 +1,74 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
-import { createCanvas } from "@napi-rs/canvas";
+import { createCanvas, GlobalFonts, Image } from "@napi-rs/canvas";
 import { Type } from "@sinclair/typebox";
 import { Chart, type ChartConfiguration, type Plugin, registerables } from "chart.js";
 
 Chart.register(...registerables);
 
+export const BRAND_COLORS = {
+	primary: "#74c4f6",
+	secondary: "#fbc44c",
+	text: "#2c2a29",
+	mutedText: "#756f6c",
+	grid: "#2c2a2918",
+	background: "#ffffff",
+} as const;
+
 export const DEFAULT_PALETTE = [
-	"#2563eb",
-	"#dc2626",
-	"#16a34a",
-	"#9333ea",
-	"#ea580c",
-	"#0891b2",
-	"#4f46e5",
-	"#be123c",
-	"#15803d",
-	"#a16207",
+	BRAND_COLORS.primary,
+	BRAND_COLORS.secondary,
+	"#23d1a2",
+	"#3b9fdd",
+	"#d99a05",
+	"#167f63",
+	"#acdffc",
+	"#ffda84",
+	"#8de7cf",
+	"#1d77b1",
 ];
 
 const MAX_ROWS = 5000;
 const MAX_INPUT_BYTES = 10 * 1024 * 1024;
 const MAX_LABELS = 200;
 const MAX_DATASETS = 20;
-const MAX_WIDTH = 1600;
-const MAX_HEIGHT = 1000;
-const DEFAULT_WIDTH = 1000;
-const DEFAULT_HEIGHT = 550;
+const DEFAULT_WIDTH = 1920;
+const DEFAULT_HEIGHT = 1080;
+const TEMPLATE_WIDTH = 1920;
+const TEMPLATE_HEIGHT = 1080;
 const DEFAULT_MAX_PNG_BYTES = 650_000;
 const PNG_MAGIC = "89504e470d0a1a0a";
+const BRAND_FONT = "Wix Madefor Display";
+const LOGO_ASPECT_RATIO = 365.91 / 86.81;
+
+let brandLogo: Image | undefined;
+
+function ensureBrandAssets(): Image {
+	if (brandLogo) return brandLogo;
+	const assetUrl = (path: string) => fileURLToPath(new URL(`../../assets/${path}`, import.meta.url));
+	for (const file of [
+		"fonts/WixMadeforDisplay-Regular.ttf",
+		"fonts/WixMadeforDisplay-SemiBold.ttf",
+		"fonts/WixMadeforDisplay-Bold.ttf",
+	]) {
+		if (!GlobalFonts.registerFromPath(assetUrl(file), BRAND_FONT)) {
+			throw new Error(`Could not register required chart font asset: ${file}`);
+		}
+	}
+	const svg = readFileSync(assetUrl("jm-logo-vector.svg"), "utf-8")
+		.replace(/class="cls-1"/g, `fill="${BRAND_COLORS.primary}"`)
+		.replace(/class="cls-2"/g, `fill="${BRAND_COLORS.secondary}"`);
+	const logo = new Image();
+	logo.src = Buffer.from(svg);
+	if (!logo.complete || logo.width === 0 || logo.height === 0) {
+		throw new Error("Could not load required JobMatch chart logo asset");
+	}
+	brandLogo = logo;
+	return logo;
+}
 
 const chartSchema = Type.Object({
 	label: Type.String({ description: "Brief description of the chart to render (shown to user)" }),
@@ -41,8 +79,8 @@ const chartSchema = Type.Object({
 		Type.String({ description: "Optional PNG filename. Will be sanitized and forced to .png" }),
 	),
 	title: Type.Optional(Type.String({ description: "Optional chart title" })),
-	width: Type.Optional(Type.Number({ description: "Chart width in pixels" })),
-	height: Type.Optional(Type.Number({ description: "Chart height in pixels" })),
+	width: Type.Optional(Type.Number({ description: "Chart width in pixels; branded template requires 1920" })),
+	height: Type.Optional(Type.Number({ description: "Chart height in pixels; branded template requires 1080" })),
 });
 
 type Row = Record<string, unknown>;
@@ -232,8 +270,8 @@ const valueLabelsPlugin: Plugin = {
 		if (pluginOptions?.display === false) return;
 		const { ctx } = chart;
 		ctx.save();
-		ctx.fillStyle = "#111827";
-		ctx.font = "600 12px sans-serif";
+		ctx.fillStyle = BRAND_COLORS.text;
+		ctx.font = `600 15px "${BRAND_FONT}"`;
 		ctx.textAlign = "center";
 		ctx.textBaseline = "bottom";
 
@@ -246,7 +284,13 @@ const valueLabelsPlugin: Plugin = {
 				if (rawValue === null || rawValue === undefined) continue;
 				const point = meta.data[index]?.tooltipPosition(true);
 				if (!point || point.x === null || point.y === null) continue;
-				ctx.fillText(formatChartValue(rawValue), point.x, Math.max(14, point.y - 6));
+				const text = formatChartValue(rawValue);
+				const halfWidth = ctx.measureText(text).width / 2;
+				const x = Math.min(
+					chart.chartArea.right - halfWidth - 4,
+					Math.max(chart.chartArea.left + halfWidth + 4, point.x),
+				);
+				ctx.fillText(text, x, Math.max(chart.chartArea.top + 16, point.y - 8));
 			}
 		}
 		ctx.restore();
@@ -257,9 +301,13 @@ function datasetStyle(index: number, type: ChartType, palette: string[]) {
 	const color = palette[index % palette.length];
 	return {
 		borderColor: color,
-		backgroundColor: type === "line" ? color : `${color}cc`,
-		tension: type === "line" ? 0.25 : undefined,
+		backgroundColor: color,
+		borderWidth: type === "line" ? 3 : 0,
+		tension: type === "line" ? 0.35 : undefined,
 		spanGaps: type === "line" ? true : undefined,
+		pointRadius: type === "line" ? 0 : undefined,
+		borderRadius: type === "bar" ? 4 : undefined,
+		borderSkipped: type === "bar" ? false : undefined,
 	};
 }
 
@@ -369,13 +417,22 @@ export function buildChartConfigFromRows(rows: Row[], rawSpec: unknown): ChartCo
 		options: {
 			responsive: false,
 			animation: false,
-			layout: { padding: { top: spec.dataLabels === false ? 8 : 24, right: 12, bottom: 4, left: 4 } },
+			layout: { padding: { top: 10, right: 16, bottom: 4, left: 4 } },
 			plugins: {
-				title: { display: Boolean(spec.title), text: spec.title, color: "#111827" },
+				title: { display: Boolean(spec.title), text: spec.title, color: BRAND_COLORS.text },
 				legend: {
 					display: datasets.length > 1,
-					position: spec.legendPosition || "bottom",
-					labels: { color: "#111827" },
+					position: spec.legendPosition || "top",
+					align: "start",
+					labels: {
+						color: BRAND_COLORS.text,
+						usePointStyle: true,
+						pointStyle: "circle",
+						boxWidth: 9,
+						boxHeight: 9,
+						padding: 22,
+						font: { family: BRAND_FONT, size: 15, weight: 600 },
+					},
 				},
 				...({ fabeeValueLabels: { display: spec.dataLabels !== false } } as Record<string, unknown>),
 			},
@@ -383,15 +440,28 @@ export function buildChartConfigFromRows(rows: Row[], rawSpec: unknown): ChartCo
 				y: {
 					beginAtZero: true,
 					stacked: Boolean(spec.stacked),
-					ticks: { color: "#111827" },
-					grid: { color: "#e5e7eb" },
-					title: { display: true, text: yAxisLabel, color: "#111827" },
+					border: { display: false },
+					ticks: { color: BRAND_COLORS.mutedText, padding: 18, font: { family: BRAND_FONT, size: 14 } },
+					grid: { color: BRAND_COLORS.grid, drawTicks: false },
+					title: {
+						display: true,
+						text: yAxisLabel,
+						color: BRAND_COLORS.text,
+						padding: { bottom: 20 },
+						font: { family: BRAND_FONT, size: 16, weight: 600 },
+					},
 				},
 				x: {
 					stacked: Boolean(spec.stacked),
-					ticks: { color: "#111827" },
-					grid: { color: "#f3f4f6" },
-					title: { display: true, text: xAxisLabel, color: "#111827" },
+					border: { display: false },
+					ticks: { color: BRAND_COLORS.mutedText, padding: 10, font: { family: BRAND_FONT, size: 14 } },
+					grid: { display: false, drawTicks: false },
+					title: {
+						display: true,
+						text: xAxisLabel,
+						color: BRAND_COLORS.text,
+						font: { family: BRAND_FONT, size: 16, weight: 600 },
+					},
 				},
 			},
 		},
@@ -444,7 +514,7 @@ export function buildPieChartConfigFromRows(rows: Row[], rawSpec: unknown): Char
 				{
 					label: valueField,
 					data: renderedSlices.map((slice) => slice.value),
-					backgroundColor: renderedSlices.map((_, index) => `${palette[index % palette.length]}cc`),
+					backgroundColor: renderedSlices.map((_, index) => palette[index % palette.length]),
 					borderColor: renderedSlices.map((_, index) => palette[index % palette.length]),
 				},
 			],
@@ -452,27 +522,130 @@ export function buildPieChartConfigFromRows(rows: Row[], rawSpec: unknown): Char
 		options: {
 			responsive: false,
 			animation: false,
-			layout: { padding: 12 },
+			layout: { padding: 20 },
 			plugins: {
-				title: { display: Boolean(spec.title), text: spec.title, color: "#111827" },
-				legend: { display: true, position: spec.legendPosition || "right", labels: { color: "#111827" } },
+				title: { display: Boolean(spec.title), text: spec.title, color: BRAND_COLORS.text },
+				legend: {
+					display: true,
+					position: spec.legendPosition || "right",
+					labels: { color: BRAND_COLORS.text, font: { family: BRAND_FONT, size: 15 } },
+				},
 				...({ fabeeValueLabels: { display: spec.dataLabels !== false } } as Record<string, unknown>),
 			},
 		},
 	};
 }
 
-export function renderChartConfigToPng(config: ChartConfiguration, width: number, height: number): Buffer {
+function configTitle(config: ChartConfiguration): string | undefined {
+	const title = (config.options?.plugins as Record<string, unknown> | undefined)?.title;
+	if (!title || typeof title !== "object") return undefined;
+	const text = (title as { text?: unknown }).text;
+	if (typeof text === "string") return text;
+	if (Array.isArray(text)) return text.map(String).join(" ");
+	return undefined;
+}
+
+function drawFittedTitle(context: ReturnType<ReturnType<typeof createCanvas>["getContext"]>, title: string): void {
+	let size = 48;
+	const maxWidth = 1250;
+	while (size > 28) {
+		context.font = `700 ${size}px "${BRAND_FONT}"`;
+		if (context.measureText(title).width <= maxWidth) break;
+		size -= 2;
+	}
+	context.fillText(title, 92, 63);
+}
+
+function drawTemplateLegend(
+	context: ReturnType<ReturnType<typeof createCanvas>["getContext"]>,
+	datasets: ChartConfiguration["data"]["datasets"],
+): void {
+	context.font = `600 17px "${BRAND_FONT}"`;
+	context.textBaseline = "middle";
+	let x = 120;
+	let y = 190;
+	for (const dataset of datasets) {
+		const label = dataset.label || "Series";
+		const rawColor = dataset.borderColor || dataset.backgroundColor;
+		const color = Array.isArray(rawColor) ? rawColor[0] : rawColor;
+		const itemWidth = context.measureText(label).width + 58;
+		if (x + itemWidth > 1800) {
+			x = 120;
+			y += 32;
+		}
+		context.beginPath();
+		context.fillStyle = typeof color === "string" ? color : BRAND_COLORS.primary;
+		context.arc(x, y, 7, 0, Math.PI * 2);
+		context.fill();
+		context.fillStyle = BRAND_COLORS.text;
+		context.fillText(label, x + 14, y);
+		x += itemWidth;
+	}
+	context.textBaseline = "top";
+}
+
+export function renderChartConfigToPng(
+	config: ChartConfiguration,
+	width: number,
+	height: number,
+	title = configTitle(config) || "Chart",
+): Buffer {
+	if (width !== TEMPLATE_WIDTH || height !== TEMPLATE_HEIGHT) {
+		throw new Error(
+			`Branded chart template requires ${TEMPLATE_WIDTH}x${TEMPLATE_HEIGHT}px; received ${width}x${height}px.`,
+		);
+	}
+	const logo = ensureBrandAssets();
+	Chart.defaults.font.family = BRAND_FONT;
+	Chart.defaults.color = BRAND_COLORS.text;
+
 	const canvas = createCanvas(width, height);
 	const context = canvas.getContext("2d");
+	context.fillStyle = BRAND_COLORS.background;
+	context.fillRect(0, 0, width, height);
+	context.fillStyle = BRAND_COLORS.text;
+	context.textBaseline = "top";
+	drawFittedTitle(context, title);
+
+	const logoWidth = 420;
+	context.drawImage(logo, width - 92 - logoWidth, 45, logoWidth, logoWidth / LOGO_ASPECT_RATIO);
+
+	const chartPlugins = (config.options?.plugins || {}) as Record<string, unknown>;
+	const legend = chartPlugins.legend as { display?: boolean; position?: string } | undefined;
+	const hasTemplateLegend =
+		(config.type === "line" || config.type === "bar") && legend?.display === true && legend.position === "top";
+	if (hasTemplateLegend) drawTemplateLegend(context, config.data.datasets);
+	const chartTop = hasTemplateLegend ? 220 : 180;
+	const chartCanvas = createCanvas(1736, 940 - chartTop);
+	const chartContext = chartCanvas.getContext("2d");
 	const chartConfig: ChartConfiguration = {
 		...config,
+		options: {
+			...config.options,
+			responsive: false,
+			animation: false,
+			plugins: {
+				...chartPlugins,
+				title: { ...(chartPlugins.title as object | undefined), display: false },
+				...(hasTemplateLegend ? { legend: { ...(legend as object), display: false } } : {}),
+			},
+		},
 		plugins: [whiteBackgroundPlugin, valueLabelsPlugin, ...(config.plugins || [])],
 	};
-	const chart = new Chart(context as never, chartConfig);
+	const chart = new Chart(chartContext as never, chartConfig);
 	chart.update();
-	const buffer = canvas.toBuffer("image/png");
+	context.drawImage(chartCanvas, 92, chartTop);
 	chart.destroy();
+
+	context.fillStyle = BRAND_COLORS.text;
+	context.font = `500 20px "${BRAND_FONT}"`;
+	context.textBaseline = "top";
+	context.fillText("Proprietary and confidential", 92, 1010);
+	context.textAlign = "right";
+	context.fillText(`© ${new Date().getFullYear()} JobMatchMe GmbH`, width - 92, 1010);
+	context.textAlign = "left";
+
+	const buffer = canvas.toBuffer("image/png");
 	if (buffer.subarray(0, 8).toString("hex") !== PNG_MAGIC) {
 		throw new Error("Chart renderer did not produce a valid PNG buffer");
 	}
@@ -486,12 +659,12 @@ function getChartMaxPngBytes(): number {
 	return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_MAX_PNG_BYTES;
 }
 
-function normalizeDimension(value: number | undefined, defaultValue: number, maxValue: number, label: string): number {
-	if (value === undefined) return defaultValue;
-	if (!Number.isFinite(value) || value <= 0 || value > maxValue) {
-		throw new Error(`Invalid chart ${label}: ${value}. Must be > 0 and <= ${maxValue}.`);
+function normalizeTemplateDimension(value: number | undefined, expected: number, label: string): number {
+	if (value === undefined) return expected;
+	if (!Number.isFinite(value) || Math.round(value) !== expected) {
+		throw new Error(`Branded chart template requires ${label} ${expected}px; received ${value}.`);
 	}
-	return Math.round(value);
+	return expected;
 }
 
 function sanitizeOutputName(value: string | undefined, title: string | undefined): string {
@@ -537,6 +710,7 @@ export function createChartTool(sessionDir: string): AgentTool<typeof chartSchem
 		execute: async (
 			_toolCallId: string,
 			{
+				label,
 				inputPath,
 				chartSpec,
 				pieSpec,
@@ -561,12 +735,14 @@ export function createChartTool(sessionDir: string): AgentTool<typeof chartSchem
 				throw new Error("Exactly one of chartSpec or pieSpec must be provided.");
 			}
 			const rows = await readRowsFromJsonPath(inputPath);
-			const renderedWidth = normalizeDimension(width, DEFAULT_WIDTH, MAX_WIDTH, "width");
-			const renderedHeight = normalizeDimension(height, DEFAULT_HEIGHT, MAX_HEIGHT, "height");
+			const renderedWidth = normalizeTemplateDimension(width, DEFAULT_WIDTH, "width");
+			const renderedHeight = normalizeTemplateDimension(height, DEFAULT_HEIGHT, "height");
 			const config = chartSpec
 				? buildChartConfigFromRows(rows, chartSpec)
 				: buildPieChartConfigFromRows(rows, pieSpec);
-			const buffer = renderChartConfigToPng(config, renderedWidth, renderedHeight);
+			const renderedTitle =
+				title || (chartSpec as ChartSpec | undefined)?.title || (pieSpec as PieSpec | undefined)?.title || label;
+			const buffer = renderChartConfigToPng(config, renderedWidth, renderedHeight, renderedTitle);
 			const maxPngBytes = getChartMaxPngBytes();
 			if (buffer.length > maxPngBytes) {
 				throw new Error(

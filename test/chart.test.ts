@@ -1,6 +1,7 @@
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createCanvas, loadImage } from "@napi-rs/canvas";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WorkerLocalBlobStore } from "../src/blob-store.js";
 import {
@@ -29,7 +30,7 @@ describe("chart helpers", () => {
 		expect(normalizeRows({ data: [{ x: "a", y: 1 }] })).toEqual([{ x: "a", y: 1 }]);
 	});
 
-	it("renders a simple bar chart PNG", () => {
+	it("renders a simple bar chart PNG", async () => {
 		const config = buildChartConfigFromRows(
 			[
 				{ day: "2026-05-01", likes: 3 },
@@ -41,8 +42,21 @@ describe("chart helpers", () => {
 		expect(scales.x.title).toMatchObject({ display: true, text: "Day" });
 		expect(scales.y.title).toMatchObject({ display: true, text: "Likes" });
 		expect((config.options?.plugins as Record<string, unknown>).fabeeValueLabels).toMatchObject({ display: true });
-		const png = renderChartConfigToPng(config, 600, 300);
+		const png = renderChartConfigToPng(config, 1920, 1080);
 		expect(png.subarray(0, 8).toString("hex")).toBe("89504e470d0a1a0a");
+		const image = await loadImage(png);
+		expect([image.width, image.height]).toEqual([1920, 1080]);
+		const canvas = createCanvas(1920, 1080);
+		const context = canvas.getContext("2d");
+		context.drawImage(image, 0, 0);
+		const containsRgb = (pixels: Uint8ClampedArray, rgb: [number, number, number]) => {
+			for (let index = 0; index < pixels.length; index += 4) {
+				if (pixels[index] === rgb[0] && pixels[index + 1] === rgb[1] && pixels[index + 2] === rgb[2]) return true;
+			}
+			return false;
+		};
+		expect(containsRgb(context.getImageData(1408, 45, 170, 110).data, [116, 196, 246])).toBe(true);
+		expect(containsRgb(context.getImageData(1578, 45, 250, 110).data, [251, 196, 76])).toBe(true);
 		expect(png.length).toBeGreaterThan(1000);
 	});
 
@@ -184,8 +198,25 @@ describe("chart tool", () => {
 		});
 
 		expect((result.content[0] as { text: string }).text).toContain("Rendered chart file likes.png");
+		expect(result.details).toMatchObject({ width: 1920, height: 1080 });
 		const outputPath = join(sessionDir, "outputs", "charts", "likes.png");
 		expect((await readFile(outputPath)).subarray(0, 8).toString("hex")).toBe("89504e470d0a1a0a");
+	});
+
+	it("rejects dimensions that do not match the branded template", async () => {
+		const sessionDir = await tempDir();
+		const inputPath = join(sessionDir, "input.json");
+		await writeFile(inputPath, JSON.stringify({ show: [{ day: "2026-05-01", likes: 7 }] }), "utf-8");
+		const tool = createChartTool(sessionDir);
+
+		await expect(
+			tool.execute("tool-call", {
+				label: "Render chart",
+				inputPath,
+				chartSpec: { type: "bar", x: "day", y: "likes" },
+				width: 1000,
+			}),
+		).rejects.toThrow(/requires width 1920px/);
 	});
 
 	it("rejects non-json input paths", async () => {

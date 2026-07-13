@@ -4,7 +4,7 @@
 ARG NODE_BASE_IMAGE=node:22.19.0-alpine3.22@sha256:d2166de198f26e17e5a442f537754dd616ab069c47cc57b889310a717e0abbf9
 FROM ${NODE_BASE_IMAGE} AS build
 
-RUN apk add --no-cache fontconfig ttf-dejavu
+RUN apk add --no-cache fontconfig
 
 WORKDIR /app
 COPY package*.json ./
@@ -27,7 +27,6 @@ RUN apk add --no-cache \
     ripgrep \
     ca-certificates \
     fontconfig \
-    ttf-dejavu \
     tini \
     "python3~3.12" \
     py3-pip \
@@ -45,6 +44,7 @@ COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/README.md ./README.md
 COPY --from=build /app/UPSTREAM.md ./UPSTREAM.md
+COPY --from=build /app/assets ./assets
 COPY --from=build /app/charts ./charts
 
 RUN mkdir -p /home/app /workspace /var/run/bee && chown -R 10001:10001 /home/app /workspace /var/run/bee /app

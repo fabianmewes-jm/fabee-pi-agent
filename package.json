@@ -33,6 +33,7 @@
 		"LICENSE",
 		"README.md",
 		"UPSTREAM.md",
+		"assets",
 		"charts"
 	],
 	"scripts": {

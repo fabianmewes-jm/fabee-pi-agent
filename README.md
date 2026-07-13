@@ -86,7 +86,7 @@ Primary variables:
 - `BEE_PI_AGENT_AUTH_FILE` optional auth file override
 - `BEE_PI_AGENT_MODEL_PROVIDER` optional provider override
 - `BEE_PI_AGENT_MODEL_ID` optional model override
-- `BEE_PI_AGENT_THINKING_LEVEL` optional reasoning level: `off`, `minimal`, `low`, `medium`, `high`, or `xhigh`; default `off`
+- `BEE_PI_AGENT_THINKING_LEVEL` optional reasoning level: `off`, `minimal`, `low`, `medium`, `high`, or `xhigh`; default `medium`
 - `BEE_PI_AGENT_TOOL_MODULES` optional comma-separated extra tool modules
 - `BEE_PI_AGENT_ENABLE_COMPANY_BRIEFING` optional `true`/`1` env gate for the baked-in `company_briefing` worker tool
 - `BEE_PI_AGENT_COMPANY_BRIEFING_DBT_TARGET` optional dbt target for `company_briefing`, defaulting to `prod`

@@ -20,17 +20,18 @@ const INLINE_JOBOFFER_DETAIL_LIMIT = 5;
 
 const companyBriefingSchema = Type.Object(
 	{
-		label: Type.String({ description: "Brief description of the Company Briefing request (shown to user)" }),
+		label: Type.String({ description: "Kurze Beschreibung der Anfrage für das Unternehmensbriefing" }),
 		companyId: Type.String({
-			description: "JobMatch Company UUID. Company Briefings must be requested by companyId, not by name.",
+			description:
+				"JobMatch-Unternehmens-UUID. Unternehmensbriefings müssen mit Unternehmens-ID angefragt werden, nicht mit dem Namen.",
 			pattern: COMPANY_ID_PATTERN,
 		}),
 		periodFrom: Type.Optional(
-			Type.String({ description: "Optional explicit briefing start timestamp/date, e.g. 2026-06-01 or ISO-8601." }),
+			Type.String({ description: "Optionaler Startzeitpunkt, zum Beispiel 2026-06-01 oder ISO-8601." }),
 		),
 		periodTo: Type.Optional(
 			Type.String({
-				description: "Optional explicit briefing end timestamp/date. Defaults to now when periodFrom is set.",
+				description: "Optionaler Endzeitpunkt. Standard ist jetzt, wenn periodFrom gesetzt ist.",
 			}),
 		),
 	},
@@ -275,7 +276,7 @@ function normalizeRequiredTimestamp(
 		notices.push(
 			platformWarning(
 				"UNEXPECTED_NULL_OR_INVALID_JOBOFFER_FIELD",
-				`Joboffer ${jobofferId} hat kein gültiges ${fieldName}; der betroffene Product Assignment Eintrag wurde ausgelassen.`,
+				`Stellenanzeige ${jobofferId} hat kein gültiges ${fieldName}; die betroffene Produktzuordnung wurde ausgelassen.`,
 			),
 		);
 		return null;
@@ -295,7 +296,7 @@ function normalizeNullableTimestampWithNotice(
 		notices.push(
 			platformWarning(
 				"UNEXPECTED_INVALID_JOBOFFER_TIMESTAMP",
-				`Joboffer ${jobofferId} enthält ein ungültiges ${fieldName}; das Feld wurde auf null gesetzt.`,
+				`Stellenanzeige ${jobofferId} enthält ein ungültiges ${fieldName}; das Feld wurde auf null gesetzt.`,
 			),
 		);
 	}
@@ -307,7 +308,7 @@ function normalizeCount(value: unknown, fieldName: string, jobofferId: string, n
 		notices.push(
 			platformWarning(
 				"UNEXPECTED_NULL_JOBOFFER_COUNT",
-				`Joboffer ${jobofferId} enthält keinen Wert für ${fieldName}; der Count wurde auf 0 gesetzt.`,
+				`Stellenanzeige ${jobofferId} enthält keinen Wert für ${fieldName}; die Anzahl wurde auf 0 gesetzt.`,
 			),
 		);
 		return 0;
@@ -317,7 +318,7 @@ function normalizeCount(value: unknown, fieldName: string, jobofferId: string, n
 		notices.push(
 			platformWarning(
 				"UNEXPECTED_INVALID_JOBOFFER_COUNT",
-				`Joboffer ${jobofferId} enthält einen ungültigen Wert für ${fieldName}; der Count wurde auf 0 gesetzt.`,
+				`Stellenanzeige ${jobofferId} enthält einen ungültigen Wert für ${fieldName}; die Anzahl wurde auf 0 gesetzt.`,
 			),
 		);
 		return 0;
@@ -339,7 +340,7 @@ function normalizeBoolean(value: unknown, fieldName: string, jobofferId: string,
 	notices.push(
 		platformWarning(
 			"UNEXPECTED_INVALID_JOBOFFER_BOOLEAN",
-			`Joboffer ${jobofferId} enthält keinen gültigen Boolean für ${fieldName}; der Wert wurde auf false gesetzt.`,
+			`Stellenanzeige ${jobofferId} enthält keinen gültigen Wahrheitswert für ${fieldName}; der Wert wurde auf false gesetzt.`,
 		),
 	);
 	return false;
@@ -381,7 +382,7 @@ function normalizePreviousProductAssignments(
 			notices.push(
 				platformWarning(
 					"UNEXPECTED_INVALID_PRODUCT_ASSIGNMENT",
-					`Joboffer ${jobofferId} enthält einen ungültigen Product Assignment Eintrag; der Eintrag wurde ausgelassen.`,
+					`Stellenanzeige ${jobofferId} enthält eine ungültige Produktzuordnung; der Eintrag wurde ausgelassen.`,
 				),
 			);
 			continue;
@@ -393,7 +394,7 @@ function normalizePreviousProductAssignments(
 			notices.push(
 				platformWarning(
 					"UNEXPECTED_NULL_PRODUCT_ASSIGNMENT_PRODUCT",
-					`Joboffer ${jobofferId} enthält einen Product Assignment Eintrag ohne Product; UNKNOWN_PRODUCT wurde gesetzt.`,
+					`Stellenanzeige ${jobofferId} enthält eine Produktzuordnung ohne Produkt; UNKNOWN_PRODUCT wurde gesetzt.`,
 				),
 			);
 		}
@@ -417,25 +418,26 @@ function normalizePreviousProductAssignments(
 
 function normalizeInputTimestamp(value: unknown, fieldName: string): string | undefined {
 	if (value === null || value === undefined || value === "") return undefined;
-	if (typeof value !== "string") throw new Error(`company_briefing.${fieldName} must be a timestamp string`);
+	if (typeof value !== "string") throw new Error(`company_briefing.${fieldName} muss ein Zeitstempel sein`);
 	const normalized = normalizeTimestamp(value);
-	if (!normalized) throw new Error(`company_briefing.${fieldName} must be a valid timestamp/date`);
+	if (!normalized)
+		throw new Error(`company_briefing.${fieldName} muss ein gültiger Zeitstempel oder ein gültiges Datum sein`);
 	return normalized;
 }
 
 export function validateCompanyBriefingArgs(value: unknown): CompanyBriefingToolInput {
 	if (!value || typeof value !== "object") {
-		throw new Error("company_briefing arguments must be an object");
+		throw new Error("company_briefing-Argumente müssen ein Objekt sein");
 	}
 	const candidate = value as Record<string, unknown>;
 	const companyId = typeof candidate.companyId === "string" ? candidate.companyId.trim() : "";
 	if (!new RegExp(COMPANY_ID_PATTERN).test(companyId)) {
-		throw new Error("company_briefing.companyId must be a JobMatch Company UUID");
+		throw new Error("company_briefing.companyId muss eine JobMatch-Unternehmens-UUID sein");
 	}
 	const periodFrom = normalizeInputTimestamp(candidate.periodFrom, "periodFrom");
 	const periodTo = normalizeInputTimestamp(candidate.periodTo, "periodTo");
 	if (periodTo && !periodFrom) {
-		throw new Error("company_briefing.periodFrom is required when periodTo is set");
+		throw new Error("company_briefing.periodFrom ist erforderlich, wenn periodTo gesetzt ist");
 	}
 	return { companyId: companyId.toLowerCase(), periodFrom, periodTo };
 }
@@ -453,7 +455,7 @@ export function mapJobofferActivityRows(rows: Record<string, unknown>[]): {
 			notices.push(
 				platformWarning(
 					"UNEXPECTED_NULL_JOBOFFER_ID",
-					"Ein Joboffer Activity Overview Eintrag ohne jobofferId wurde ausgelassen.",
+					"Ein Aktivitätseintrag ohne Stellenanzeigen-ID wurde ausgelassen.",
 				),
 			);
 			continue;
@@ -465,7 +467,7 @@ export function mapJobofferActivityRows(rows: Record<string, unknown>[]): {
 			notices.push(
 				platformWarning(
 					"JOBOFFER_TITLE_FALLBACK_APPLIED",
-					`Joboffer ${jobofferId} hat keinen Titel; die jobofferId wurde als Titel gesetzt.`,
+					`Stellenanzeige ${jobofferId} hat keinen Titel; die Stellenanzeigen-ID wurde als Titel gesetzt.`,
 				),
 			);
 		}
@@ -552,24 +554,24 @@ export function createJobofferActivityOverviewSignal(
 	const otherBewerbungen = joboffers.reduce((sum, joboffer) => sum + joboffer.newOtherBewerbungenCount, 0);
 	const otherHires = joboffers.reduce((sum, joboffer) => sum + joboffer.newOtherHiresCount, 0);
 	const expiring = joboffers.filter((joboffer) => joboffer.isExpiring).length;
-	const otherSuffix = otherActive > 0 ? `, Other: ${otherActive}` : "";
+	const otherSuffix = otherActive > 0 ? `, sonstige: ${otherActive}` : "";
 	const otherActivitySuffix =
-		otherBewerbungen > 0 || otherHires > 0 ? `; Other ${otherBewerbungen}/${otherHires}` : "";
+		otherBewerbungen > 0 || otherHires > 0 ? `; sonstige ${otherBewerbungen}/${otherHires}` : "";
 	const facts = [
-		`${joboffers.length} Joboffers waren in der Briefing Period active (Paid: ${paidActive}, Freemium: ${freemiumActive}${otherSuffix}).`,
-		`New Bewerbungen/Hires: Paid ${paidBewerbungen}/${paidHires}; Freemium ${freemiumBewerbungen}/${freemiumHires}${otherActivitySuffix}.`,
+		`${joboffers.length} Stellenanzeigen waren im Zeitraum aktiv (bezahlt: ${paidActive}, kostenlos: ${freemiumActive}${otherSuffix}).`,
+		`Neue Bewerbungen/Einstellungen: bezahlt ${paidBewerbungen}/${paidHires}; kostenlos ${freemiumBewerbungen}/${freemiumHires}${otherActivitySuffix}.`,
 	];
 	if (expiring > 0) {
-		facts.push(`${expiring} Expiring Joboffers enden innerhalb der nächsten 7 Tage.`);
+		facts.push(`${expiring} auslaufende Stellenanzeigen enden innerhalb der nächsten 7 Tage.`);
 	}
 	if (joboffers.length === 0) {
-		facts.push("Keine Joboffers waren in der Briefing Period active.");
+		facts.push("Keine Stellenanzeigen waren im Zeitraum aktiv.");
 	}
 
 	return {
 		id: "platform.jobofferActivityOverview",
 		type: JOBOFFER_ACTIVITY_OVERVIEW_TYPE,
-		title: "Joboffer Bewerbungs-/Hire-Übersicht",
+		title: "Übersicht zu Bewerbungen und Einstellungen",
 		facts,
 		data: { joboffers },
 	};
@@ -602,17 +604,17 @@ function truncateText(value: string | null, maxLength: number): string | null {
 function formatCrmTypeLabel(objectType: string): string {
 	switch (objectType) {
 		case "call":
-			return "Call";
+			return "Telefonat";
 		case "email":
-			return "Email";
+			return "E-Mail";
 		case "deal":
-			return "Deal";
+			return "Verkaufschance";
 		case "note":
-			return "Note";
+			return "Notiz";
 		case "meeting":
-			return "Meeting";
+			return "Termin";
 		case "task":
-			return "Task";
+			return "Aufgabe";
 		default:
 			return objectType;
 	}
@@ -663,7 +665,7 @@ export function mapCrmActivityRows(rows: Record<string, unknown>[]): {
 			notices.push(
 				crmWarning(
 					"UNEXPECTED_INVALID_CRM_ACTIVITY_ROW",
-					"Ein CRM Activity Eintrag ohne objectType, objectId oder occurredAt wurde ausgelassen.",
+					"Ein CRM-Aktivitätseintrag ohne objectType, objectId oder occurredAt wurde ausgelassen.",
 				),
 			);
 			continue;
@@ -688,14 +690,14 @@ export function createCrmActivityOverviewSignal(activities: CrmActivityItem[]): 
 	}, {});
 	const facts = [
 		activities.length === 0
-			? "Keine CRM Aktivitäten in der Briefing Period gefunden."
-			: `${activities.length} CRM Aktivitäten in der Briefing Period gefunden.`,
+			? "Keine CRM-Aktivitäten im Zeitraum gefunden."
+			: `${activities.length} CRM-Aktivitäten im Zeitraum gefunden.`,
 	];
 
 	return {
 		id: "crm.activityOverview",
 		type: CRM_ACTIVITY_OVERVIEW_TYPE,
-		title: "CRM Aktivitätsübersicht",
+		title: "CRM-Aktivitätsübersicht",
 		facts,
 		data: { activities, countsByType },
 	};
@@ -715,7 +717,7 @@ function mapCompanyContextRows(rows: Record<string, unknown>[], requestedCompany
 			buildNotice(
 				"WARNING",
 				"COMPANY_NAME_FALLBACK_APPLIED",
-				"Die Company hatte keinen HubSpot Company Name; die companyId wurde als Name gesetzt.",
+				"Das Unternehmen hatte keinen HubSpot-Namen; die Unternehmens-ID wurde als Name gesetzt.",
 				"CRM_SIGNALS",
 			),
 		);
@@ -1071,7 +1073,7 @@ class DbtCompanyBriefingDataAccess implements CompanyBriefingDataAccess {
 
 	async getCompanyContext(companyId: string, signal?: AbortSignal): Promise<CompanyContextLookup> {
 		const rows = await this.query(
-			"Load Company Briefing authorization context",
+			"Unternehmenskontext für Briefing laden",
 			buildCompanyContextSql(companyId),
 			signal,
 		);
@@ -1080,7 +1082,7 @@ class DbtCompanyBriefingDataAccess implements CompanyBriefingDataAccess {
 
 	async getBookingInventoryFreshness(signal?: AbortSignal): Promise<BookingInventoryFreshness> {
 		const rows = await this.query(
-			"Check Booking Inventory freshness for Company Briefing",
+			"Datenfrische der Buchungsdaten prüfen",
 			buildBookingInventoryFreshnessSql(),
 			signal,
 		);
@@ -1094,7 +1096,7 @@ class DbtCompanyBriefingDataAccess implements CompanyBriefingDataAccess {
 		signal?: AbortSignal,
 	): Promise<Record<string, unknown>[]> {
 		return this.query(
-			"Load JOBOFFER_ACTIVITY_OVERVIEW for Company Briefing",
+			"Übersicht zu Stellenanzeigen laden",
 			buildJobofferActivityOverviewSql(companyId, briefingPeriod),
 			signal,
 		);
@@ -1105,11 +1107,7 @@ class DbtCompanyBriefingDataAccess implements CompanyBriefingDataAccess {
 		briefingPeriod: BriefingPeriod,
 		signal?: AbortSignal,
 	): Promise<Record<string, unknown>[]> {
-		return this.query(
-			"Load CRM_ACTIVITY_OVERVIEW for Company Briefing",
-			buildCrmActivitySql(companyId, briefingPeriod),
-			signal,
-		);
+		return this.query("CRM-Aktivitäten laden", buildCrmActivitySql(companyId, briefingPeriod), signal);
 	}
 }
 
@@ -1133,13 +1131,13 @@ export function getBookingInventoryStalenessNotice(
 	if (!maxActiveDate) {
 		return platformWarning(
 			"BOOKING_INVENTORY_FRESHNESS_UNKNOWN",
-			"Die Datenfrische des Booking Inventory konnte nicht bestimmt werden.",
+			"Die Datenfrische der Buchungsdaten konnte nicht bestimmt werden.",
 		);
 	}
 	if (maxActiveDate < periodToDate) {
 		return platformWarning(
 			"BOOKING_INVENTORY_STALE",
-			`Booking Inventory wirkt veraltet (max active_date: ${maxActiveDate}, Briefing-Datum: ${periodToDate}).`,
+			`Buchungsdaten wirken veraltet (max active_date: ${maxActiveDate}, Datum des Briefings: ${periodToDate}).`,
 		);
 	}
 	return undefined;
@@ -1160,7 +1158,7 @@ export async function collectPlatformSignals(args: {
 		notices.push(
 			platformWarning(
 				"BOOKING_INVENTORY_FRESHNESS_UNAVAILABLE",
-				"Die Datenfrische des Booking Inventory konnte nicht geprüft werden.",
+				"Die Datenfrische der Buchungsdaten konnte nicht geprüft werden.",
 			),
 		);
 	}
@@ -1172,7 +1170,7 @@ export async function collectPlatformSignals(args: {
 		notices.push(
 			platformWarning(
 				"PLATFORM_SIGNALS_QUERY_FAILED",
-				"Platform Signals konnten nicht vollständig geladen werden; das Company Briefing wird ohne Joboffer Activity Overview fortgesetzt.",
+				"Plattformdaten konnten nicht vollständig geladen werden; das Unternehmensbriefing wird ohne Übersicht zu Stellenanzeigen fortgesetzt.",
 			),
 		);
 		return { platformSignals: [], notices };
@@ -1201,7 +1199,7 @@ export async function collectCrmSignals(args: {
 			notices: [
 				crmWarning(
 					"CRM_SIGNALS_QUERY_FAILED",
-					"CRM Signals konnten nicht aus dem Company Briefing CRM Activity Modell geladen werden.",
+					"CRM-Daten konnten nicht aus dem Modell für CRM-Aktivitäten im Unternehmensbriefing geladen werden.",
 				),
 			],
 		};
@@ -1253,7 +1251,7 @@ function determineBriefingPeriod(
 				buildNotice(
 					"WARNING",
 					"LAST_REACHED_CALL_TOO_OLD",
-					"Der Last Reached Call ist älter als 180 Tage; die 60-Tage-Fallback-Period wurde verwendet.",
+					"Das letzte erreichte Telefonat ist älter als 180 Tage; der 60-Tage-Ersatzzeitraum wurde verwendet.",
 					"CRM_SIGNALS",
 				),
 			);
@@ -1262,7 +1260,7 @@ function determineBriefingPeriod(
 				buildNotice(
 					"WARNING",
 					"LAST_REACHED_CALL_INVALID",
-					"Der Last Reached Call liegt nicht vor der Request-Zeit; die 60-Tage-Fallback-Period wurde verwendet.",
+					"Das letzte erreichte Telefonat liegt nicht vor dem Anfragezeitpunkt; der 60-Tage-Ersatzzeitraum wurde verwendet.",
 					"CRM_SIGNALS",
 				),
 			);
@@ -1272,7 +1270,7 @@ function determineBriefingPeriod(
 			buildNotice(
 				"INFO",
 				"BRIEFING_PERIOD_FALLBACK_60_DAYS",
-				"Kein Last Reached Call gefunden; die Briefing Period nutzt den 60-Tage-Fallback.",
+				"Kein letztes erreichtes Telefonat gefunden; der Zeitraum nutzt den 60-Tage-Ersatz.",
 				"CRM_SIGNALS",
 			),
 		);
@@ -1319,20 +1317,20 @@ export async function executeCompanyBriefing(
 	} catch {
 		return fail(
 			"COMPANY_CONTEXT_UNAVAILABLE",
-			"Der Company Kontext konnte nicht geladen werden; es wurde kein Company Briefing ausgegeben.",
+			"Der Unternehmenskontext konnte nicht geladen werden; es wurde kein Unternehmensbriefing ausgegeben.",
 		);
 	}
 
 	if (companyLookup.status === "not_found") {
 		return fail(
 			"HUBSPOT_COMPANY_NOT_FOUND",
-			"Für diese companyId wurde keine HubSpot Company gefunden; es wurde kein Company Briefing ausgegeben.",
+			"Für diese Unternehmens-ID wurde kein HubSpot-Unternehmen gefunden; es wurde kein Unternehmensbriefing ausgegeben.",
 		);
 	}
 	if (companyLookup.status === "not_unique") {
 		return fail(
 			"HUBSPOT_COMPANY_NOT_UNIQUE",
-			"Für diese companyId wurden mehrere HubSpot Companies gefunden; es wurde kein Company Briefing ausgegeben.",
+			"Für diese Unternehmens-ID wurden mehrere HubSpot-Unternehmen gefunden; es wurde kein Unternehmensbriefing ausgegeben.",
 		);
 	}
 
@@ -1343,7 +1341,7 @@ export async function executeCompanyBriefing(
 	if (explicitPeriod && new Date(explicitPeriod.from).getTime() >= new Date(explicitPeriod.to).getTime()) {
 		return fail(
 			"INVALID_BRIEFING_PERIOD",
-			"Die explizite Briefing Period ist ungültig; periodFrom muss vor periodTo liegen.",
+			"Der explizite Zeitraum ist ungültig; periodFrom muss vor periodTo liegen.",
 		);
 	}
 	const { period, notices: periodNotices } = explicitPeriod
@@ -1409,7 +1407,7 @@ function formatDateTimeForMarkdown(value: string | null): string {
 }
 
 function formatNullableProduct(joboffer: JobofferActivityOverviewItem): string {
-	if (!joboffer.currentProduct) return "kein aktuelles Product";
+	if (!joboffer.currentProduct) return "kein aktuelles Produkt";
 	const since = joboffer.currentProductSince ? ` seit ${formatDateTimeForMarkdown(joboffer.currentProductSince)}` : "";
 	return `${joboffer.currentProduct}${since}`;
 }
@@ -1432,13 +1430,13 @@ function renderExecutiveSummary(briefing: CompanyBriefing): string {
 	const jobofferSignal = findJobofferActivitySignal(briefing);
 	return jobofferSignal
 		? jobofferSignal.facts.map((fact) => `• ${fact}`).join("\n")
-		: "• Company Briefing erstellt; die Joboffer Activity Overview ist nicht verfügbar.";
+		: "• Unternehmensbriefing erstellt; die Übersicht zu Stellenanzeigen ist nicht verfügbar.";
 }
 
 function renderJobofferActivityOverviewMarkdown(signal: PlatformSignal<JobofferActivityOverviewData>): string {
 	const joboffers = signal.data.joboffers;
 	if (joboffers.length === 0) {
-		return "• Keine Joboffers waren in der Briefing Period active.";
+		return "• Keine Stellenanzeigen waren im Zeitraum aktiv.";
 	}
 	const paidActive = joboffers.filter((joboffer) => joboffer.wasPaidInPeriod).length;
 	const freemiumActive = joboffers.filter((joboffer) => joboffer.wasFreemiumInPeriod).length;
@@ -1447,8 +1445,8 @@ function renderJobofferActivityOverviewMarkdown(signal: PlatformSignal<JobofferA
 	const paidHires = joboffers.reduce((sum, joboffer) => sum + joboffer.newPaidHiresCount, 0);
 	const freemiumHires = joboffers.reduce((sum, joboffer) => sum + joboffer.newFreemiumHiresCount, 0);
 	const lines: string[] = [
-		`• *Paid:* ${paidActive} active Joboffers, ${paidBewerbungen} New Bewerbungen, ${paidHires} New Hires`,
-		`• *Freemium:* ${freemiumActive} active Joboffers, ${freemiumBewerbungen} New Bewerbungen, ${freemiumHires} New Hires`,
+		`• *Bezahlt:* ${paidActive} aktive Stellenanzeigen, ${paidBewerbungen} neue Bewerbungen, ${paidHires} neue Einstellungen`,
+		`• *Kostenlos:* ${freemiumActive} aktive Stellenanzeigen, ${freemiumBewerbungen} neue Bewerbungen, ${freemiumHires} neue Einstellungen`,
 	];
 	let paidNoActivity = 0;
 	let freemiumNoActivity = 0;
@@ -1470,33 +1468,37 @@ function renderJobofferActivityOverviewMarkdown(signal: PlatformSignal<JobofferA
 		}
 		shownWithSignals += 1;
 		const parts = [
-			`${joboffer.newBewerbungenCount} New Bewerbungen (${joboffer.newPaidBewerbungenCount} Paid / ${joboffer.newFreemiumBewerbungenCount} Freemium)`,
-			`${joboffer.newHiresCount} New Hires (${joboffer.newPaidHiresCount} Paid / ${joboffer.newFreemiumHiresCount} Freemium)`,
+			`${joboffer.newBewerbungenCount} neue Bewerbungen (${joboffer.newPaidBewerbungenCount} bezahlt / ${joboffer.newFreemiumBewerbungenCount} kostenlos)`,
+			`${joboffer.newHiresCount} neue Einstellungen (${joboffer.newPaidHiresCount} bezahlt / ${joboffer.newFreemiumHiresCount} kostenlos)`,
 			formatNullableProduct(joboffer),
-			joboffer.isExpiring ? `Expiring am ${formatDateTimeForMarkdown(joboffer.bookingEndsAt)}` : undefined,
-			joboffer.currentlyActive ? "aktuell active" : "aktuell nicht active",
+			joboffer.isExpiring ? `läuft am ${formatDateTimeForMarkdown(joboffer.bookingEndsAt)} aus` : undefined,
+			joboffer.currentlyActive ? "aktuell aktiv" : "aktuell nicht aktiv",
 		].filter((part): part is string => Boolean(part));
 		lines.push(`• *${sanitizeMarkdownText(joboffer.title)}* (${joboffer.jobofferId}): ${parts.join(", ")}`);
 	}
 	if (hiddenWithSignals > 0) {
 		lines.push(
-			`• ${hiddenWithSignals} weitere Joboffers mit New Bewerbungen/New Hires/Expiring nicht inline angezeigt.`,
+			`• ${hiddenWithSignals} weitere Stellenanzeigen mit neuen Bewerbungen, neuen Einstellungen oder auslaufender Buchung werden nur in der CSV gezeigt.`,
 		);
 	}
 	if (paidNoActivity > 0) {
-		lines.push(`• ${paidNoActivity} weitere active Paid Joboffers ohne New Bewerbungen/New Hires.`);
+		lines.push(
+			`• ${paidNoActivity} weitere aktive bezahlte Stellenanzeigen ohne neue Bewerbungen oder Einstellungen.`,
+		);
 	}
 	if (freemiumNoActivity > 0) {
-		lines.push(`• ${freemiumNoActivity} weitere active Freemium Joboffers ohne New Bewerbungen/New Hires.`);
+		lines.push(
+			`• ${freemiumNoActivity} weitere aktive kostenlose Stellenanzeigen ohne neue Bewerbungen oder Einstellungen.`,
+		);
 	}
 	if (otherNoActivity > 0) {
 		lines.push(
-			`• ${otherNoActivity} weitere active Joboffers ohne Product-Bucket und ohne New Bewerbungen/New Hires.`,
+			`• ${otherNoActivity} weitere aktive Stellenanzeigen ohne Produktgruppe und ohne neue Bewerbungen oder Einstellungen.`,
 		);
 	}
 	if (inactiveNoActivity > 0) {
 		lines.push(
-			`• ${inactiveNoActivity} weitere Joboffers waren in der Briefing Period active, sind aber aktuell nicht active und hatten keine New Bewerbungen/New Hires.`,
+			`• ${inactiveNoActivity} weitere Stellenanzeigen waren im Zeitraum aktiv, sind es aktuell aber nicht mehr und hatten keine neuen Bewerbungen oder Einstellungen.`,
 		);
 	}
 	return lines.join("\n");
@@ -1504,7 +1506,7 @@ function renderJobofferActivityOverviewMarkdown(signal: PlatformSignal<JobofferA
 
 function renderPlatformSignalsMarkdown(briefing: CompanyBriefing): string {
 	if (briefing.platformSignals.length === 0) {
-		return "• Platform Signals sind nicht verfügbar.";
+		return "• Plattformdaten sind nicht verfügbar.";
 	}
 	return briefing.platformSignals
 		.map((signal) => {
@@ -1536,10 +1538,10 @@ function describeCrmActivityMix(countsByType: Record<string, number>): string {
 
 function renderCrmActivityOverviewMarkdown(signal: CrmSignal<CrmActivityOverviewData>): string {
 	const activities = signal.data?.activities || [];
-	if (activities.length === 0) return "Keine CRM Aktivitäten in der Briefing Period gefunden.";
+	if (activities.length === 0) return "Keine CRM-Aktivitäten im Zeitraum gefunden.";
 
 	const countsByType = signal.data?.countsByType || {};
-	const sentences = [`In der Briefing Period wurden ${activities.length} CRM Aktivitäten erfasst.`];
+	const sentences = [`Im Zeitraum wurden ${activities.length} CRM-Aktivitäten erfasst.`];
 	const mix = describeCrmActivityMix(countsByType);
 	if (mix) sentences.push(mix);
 
@@ -1552,12 +1554,12 @@ function renderCrmActivityOverviewMarkdown(signal: CrmSignal<CrmActivityOverview
 function renderCrmSignalsMarkdown(briefing: CompanyBriefing): string {
 	const period = briefing.briefingPeriod;
 	const periodLine = period.lastReachedCallAt
-		? `• Last Reached Call: ${formatDateTimeForMarkdown(period.lastReachedCallAt)}.`
+		? `• Letztes erreichtes Telefonat: ${formatDateTimeForMarkdown(period.lastReachedCallAt)}.`
 		: period.basis === "FALLBACK_60_DAYS"
-			? "• Briefing Period nutzt den 60-Tage-Fallback."
-			: "• Kein Last Reached Call gefunden.";
+			? "• Zeitraum nutzt den 60-Tage-Ersatz."
+			: "• Kein letztes erreichtes Telefonat gefunden.";
 	const activitySignal = findCrmActivitySignal(briefing);
-	if (!activitySignal) return `${periodLine}\n• CRM Signals sind nicht verfügbar.`;
+	if (!activitySignal) return `${periodLine}\n• CRM-Daten sind nicht verfügbar.`;
 	return `${periodLine}\n\n*${activitySignal.title}*\n${renderCrmActivityOverviewMarkdown(activitySignal)}`;
 }
 
@@ -1572,21 +1574,21 @@ export function renderCompanyBriefingMarkdown(briefing: CompanyBriefing): string
 	const period = briefing.briefingPeriod;
 	const basis =
 		period.basis === "LAST_REACHED_CALL"
-			? "seit Last Reached Call"
+			? "seit dem letzten erreichten Telefonat"
 			: period.basis === "EXPLICIT"
 				? "expliziter Zeitraum"
-				: "60-Tage-Fallback";
+				: "60-Tage-Ersatz";
 	return [
-		`*Company Briefing: ${sanitizeMarkdownText(briefing.companyName)}*`,
-		"*Briefing Period*",
+		`*Unternehmensbriefing: ${sanitizeMarkdownText(briefing.companyName)}*`,
+		"*Zeitraum*",
 		`• ${formatDateTimeForMarkdown(period.from)} bis ${formatDateTimeForMarkdown(period.to)} (${basis})`,
-		"*Executive Summary*",
+		"*Kurzfassung*",
 		renderExecutiveSummary(briefing),
-		"*Sales Opportunities*",
-		"• Keine Sales Opportunities im V1-company_briefing-Tool enthalten.",
-		"*Platform Signals*",
+		"*Vertriebsansatzpunkte*",
+		"• Keine Vertriebsansatzpunkte in Version 1 des Werkzeugs enthalten.",
+		"*Plattformdaten*",
 		renderPlatformSignalsMarkdown(briefing),
-		"*CRM Signals*",
+		"*CRM-Daten*",
 		renderCrmSignalsMarkdown(briefing),
 		"*Hinweise / Datenlücken*",
 		renderNoticesMarkdown(briefing.notices),
@@ -1595,7 +1597,7 @@ export function renderCompanyBriefingMarkdown(briefing: CompanyBriefing): string
 
 function renderBlockedResponseText(response: CompanyBriefingResponse): string {
 	return [
-		"*Company Briefing konnte nicht erstellt werden.*",
+		"*Unternehmensbriefing konnte nicht erstellt werden.*",
 		"",
 		...response.notices.map((notice) => `• ${notice.message}`),
 	].join("\n");
@@ -1661,7 +1663,7 @@ async function attachJobofferDetailsCsv(
 	await artifactHandler({
 		data: Buffer.from(renderJobofferDetailsCsv(joboffers), "utf-8"),
 		name: `company_briefing_${response.companyId}_joboffers.csv`,
-		title: "Company Briefing Joboffer Details CSV",
+		title: "CSV mit Stellenanzeigen-Details",
 		mimeType: "text/csv",
 	});
 	return true;
@@ -1675,7 +1677,7 @@ export function createCompanyBriefingTool(
 		name: COMPANY_BRIEFING_TOOL_NAME,
 		label: "company_briefing",
 		description:
-			"Create a JobMatch Company Briefing from companyId. Use this tool for Company Briefings; do not reconstruct Company Briefings with arbitrary dbt/BI queries. Returns Slack-ready Markdown and structured, non-raw signal details.",
+			"Erstellt ein JobMatch-Unternehmensbriefing aus einer Unternehmens-ID. Für Unternehmensbriefings dieses Werkzeug nutzen und sie nicht mit eigenen dbt-/BI-Abfragen nachbauen. Gibt deutschsprachiges Markdown und strukturierte Details ohne Rohdaten zurück.",
 		parameters: companyBriefingSchema,
 		execute: async (_toolCallId, params, signal) => {
 			const input = validateCompanyBriefingArgs(params);
@@ -1686,7 +1688,9 @@ export function createCompanyBriefingTool(
 				content: [
 					{
 						type: "text",
-						text: csvAttached ? `${text}\n\n• Vollständige Joboffer-Detailtabelle als CSV angehängt.` : text,
+						text: csvAttached
+							? `${text}\n\n• Vollständige Stellenanzeigen-Detailtabelle als CSV angehängt.`
+							: text,
 					},
 				],
 				details: response,

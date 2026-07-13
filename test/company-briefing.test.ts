@@ -226,7 +226,7 @@ describe("JOBOFFER_ACTIVITY_OVERVIEW query and mapping", () => {
 		expect(sql).not.toContain("changedInPeriod");
 	});
 
-	it("builds the CRM activity SQL against the materialized Company Briefing model", () => {
+	it("builds the CRM activity SQL against the materialized company briefing model", () => {
 		const sql = buildCrmActivitySql(COMPANY_ID, {
 			from: "2026-06-01T00:00:00.000Z",
 			to: "2026-06-23T12:00:00.000Z",
@@ -326,7 +326,7 @@ describe("JOBOFFER_ACTIVITY_OVERVIEW query and mapping", () => {
 			data: { joboffers: expect.any(Array) },
 		});
 		expect(signal.data.joboffers).toHaveLength(2);
-		expect(signal.facts.join("\n")).toContain("Paid 6/1; Freemium 0/0");
+		expect(signal.facts.join("\n")).toContain("bezahlt 6/1; kostenlos 0/0");
 	});
 });
 
@@ -344,9 +344,9 @@ describe("company_briefing execution", () => {
 			data: { joboffers: expect.arrayContaining([expect.objectContaining({ jobofferId: "job-1" })]) },
 		});
 		expect(response.briefing?.crmSignals).toEqual([expect.objectContaining({ type: "CRM_ACTIVITY_OVERVIEW" })]);
-		expect(response.markdown).toContain("*Company Briefing: Acme GmbH*");
+		expect(response.markdown).toContain("*Unternehmensbriefing: Acme GmbH*");
 		expect(response.markdown).toContain("Pflegefachkraft");
-		expect(response.markdown).toContain("*CRM Aktivitätsübersicht*");
+		expect(response.markdown).toContain("*CRM-Aktivitätsübersicht*");
 		expect(response.markdown).toContain("Kunde fragt nach Performance");
 		expect(response.notices.map((notice) => notice.code)).toContain("BOOKING_INVENTORY_STALE");
 	});
@@ -359,11 +359,11 @@ describe("company_briefing execution", () => {
 
 		expect(response.status).toBe("OK_WITH_WARNINGS");
 		expect(response.briefing?.platformSignals).toEqual([]);
-		expect(response.markdown).toContain("Platform Signals sind nicht verfügbar");
+		expect(response.markdown).toContain("Plattformdaten sind nicht verfügbar");
 		expect(response.notices.map((notice) => notice.code)).toContain("PLATFORM_SIGNALS_QUERY_FAILED");
 	});
 
-	it("treats no active Joboffers in the Briefing Period as an empty signal, not an error", async () => {
+	it("treats no active joboffers in the briefing period as an empty signal, not an error", async () => {
 		const response = await executeCompanyBriefing({ companyId: COMPANY_ID }, servicesFor({ rows: [] }));
 
 		expect(response.status).toBe("OK");
@@ -371,14 +371,14 @@ describe("company_briefing execution", () => {
 			type: "JOBOFFER_ACTIVITY_OVERVIEW",
 			data: { joboffers: [] },
 		});
-		expect(response.markdown).toContain("Keine Joboffers waren in der Briefing Period active");
+		expect(response.markdown).toContain("Keine Stellenanzeigen waren im Zeitraum aktiv");
 	});
 
 	it("does not require requesterSlackId", async () => {
 		const response = await executeCompanyBriefing({ companyId: COMPANY_ID }, servicesFor({ rows: sampleRows() }));
 
 		expect(response.status).toBe("OK");
-		expect(response.markdown).toContain("*Company Briefing: Acme GmbH*");
+		expect(response.markdown).toContain("*Unternehmensbriefing: Acme GmbH*");
 	});
 
 	it("falls back to 60 days when the last reached call is older than 180 days", async () => {
@@ -401,7 +401,7 @@ describe("company_briefing execution", () => {
 			lastReachedCallAt: null,
 		});
 		expect(response.notices.map((notice) => notice.code)).toContain("LAST_REACHED_CALL_TOO_OLD");
-		expect(response.markdown).toContain("Briefing Period nutzt den 60-Tage-Fallback");
+		expect(response.markdown).toContain("Zeitraum nutzt den 60-Tage-Ersatz");
 		expect(access.getJobofferActivityRows).toHaveBeenCalledWith(
 			COMPANY_ID,
 			expect.objectContaining({ from: fallbackFrom, basis: "FALLBACK_60_DAYS" }),
@@ -462,11 +462,11 @@ describe("company_briefing execution", () => {
 		});
 
 		const result = await tool.execute("tool-call", {
-			label: "Company Briefing",
+			label: "Unternehmensbriefing",
 			companyId: COMPANY_ID,
 		});
 
-		expect(result.content[0]).toMatchObject({ type: "text", text: expect.stringContaining("*Company Briefing") });
+		expect(result.content[0]).toMatchObject({ type: "text", text: expect.stringContaining("*Unternehmensbriefing") });
 		expect(result.content[0]).toMatchObject({ type: "text", text: expect.stringContaining("CSV angehängt") });
 		expect(artifactHandler).toHaveBeenCalledWith(
 			expect.objectContaining({
@@ -530,16 +530,19 @@ describe("company_briefing Markdown rendering", () => {
 
 		const markdown = renderCompanyBriefingMarkdown(briefing);
 
-		expect(markdown).toContain("*Company Briefing: Acme GmbH*");
-		for (const heading of "Briefing Period|Executive Summary|Sales Opportunities|Platform Signals|CRM Signals|Hinweise / Datenlücken".split(
+		expect(markdown).toContain("*Unternehmensbriefing: Acme GmbH*");
+		for (const heading of "Zeitraum|Kurzfassung|Vertriebsansatzpunkte|Plattformdaten|CRM-Daten|Hinweise / Datenlücken".split(
 			"|",
 		)) {
 			expect(markdown).toContain(`*${heading}*`);
 		}
-		expect(markdown).toContain("1 weitere active Paid Joboffers ohne New Bewerbungen/New Hires");
+		expect(markdown).toContain("1 weitere aktive bezahlte Stellenanzeigen ohne neue Bewerbungen oder Einstellungen");
+		expect(markdown).not.toMatch(
+			/Company Briefing|Briefing Period|Executive Summary|Sales Opportunities|Platform Signals|CRM Signals|New Hires|New Bewerbungen|active Joboffers/,
+		);
 	});
 
-	it("summarizes CRM activity instead of rendering an inline timeline", () => {
+	it("summarizes CRM activity instead of rendering a timeline", () => {
 		const briefingPeriod: BriefingPeriod = {
 			from: "2026-06-01T08:00:00.000Z",
 			to: "2026-06-23T12:00:00.000Z",
@@ -579,8 +582,8 @@ describe("company_briefing Markdown rendering", () => {
 
 		const markdown = renderCompanyBriefingMarkdown(briefing);
 
-		expect(markdown).toContain("In der Briefing Period wurden 5 CRM Aktivitäten erfasst.");
-		expect(markdown).toContain("Der Schwerpunkt lag auf Email");
+		expect(markdown).toContain("Im Zeitraum wurden 5 CRM-Aktivitäten erfasst.");
+		expect(markdown).toContain("Der Schwerpunkt lag auf E-Mail");
 		expect(markdown).toContain("CRM-Kontext:");
 		expect(markdown).toContain("Kunde fragt nach Performance");
 		expect(markdown).not.toContain("Latest CRM Email");
@@ -588,10 +591,10 @@ describe("company_briefing Markdown rendering", () => {
 		expect(markdown).not.toContain("Letzte Aktivität:");
 		expect(markdown).not.toContain("Neueste Aktivität je Typ:");
 		expect(markdown).not.toContain("Older Email 1");
-		expect(markdown).not.toContain("weitere CRM Aktivitäten nicht inline angezeigt");
+		expect(markdown).not.toContain("weitere CRM-Aktivitäten nicht direkt angezeigt");
 	});
 
-	it("keeps only the first five active detail rows inline", () => {
+	it("keeps only the first five active detail rows in the message", () => {
 		const briefingPeriod: BriefingPeriod = {
 			from: "2026-06-01T08:00:00.000Z",
 			to: "2026-06-23T12:00:00.000Z",
@@ -618,7 +621,9 @@ describe("company_briefing Markdown rendering", () => {
 
 		expect(markdown).toContain("Job 5");
 		expect(markdown).not.toContain("Job 6");
-		expect(markdown).toContain("2 weitere Joboffers mit New Bewerbungen/New Hires/Expiring nicht inline angezeigt");
+		expect(markdown).toContain(
+			"2 weitere Stellenanzeigen mit neuen Bewerbungen, neuen Einstellungen oder auslaufender Buchung werden nur in der CSV gezeigt",
+		);
 	});
 });
 

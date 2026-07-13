@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.32
+
+- Better Charting tool with renderer JobMatch Template
+
 ## Unreleased
 
 - render charts in a fixed 1920×1080 JobMatch template with the CI palette, Wix Madefor Display, branded logo, and legal footer

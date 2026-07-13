@@ -35,14 +35,11 @@ const MAX_ROWS = 5000;
 const MAX_INPUT_BYTES = 10 * 1024 * 1024;
 const MAX_LABELS = 200;
 const MAX_DATASETS = 20;
-const DEFAULT_WIDTH = 1920;
-const DEFAULT_HEIGHT = 1080;
 const TEMPLATE_WIDTH = 1920;
 const TEMPLATE_HEIGHT = 1080;
 const DEFAULT_MAX_PNG_BYTES = 650_000;
 const PNG_MAGIC = "89504e470d0a1a0a";
 const BRAND_FONT = "Wix Madefor Display";
-const LOGO_ASPECT_RATIO = 365.91 / 86.81;
 
 let brandLogo: Image | undefined;
 
@@ -58,11 +55,8 @@ function ensureBrandAssets(): Image {
 			throw new Error(`Could not register required chart font asset: ${file}`);
 		}
 	}
-	const svg = readFileSync(assetUrl("jm-logo-vector.svg"), "utf-8")
-		.replace(/class="cls-1"/g, `fill="${BRAND_COLORS.primary}"`)
-		.replace(/class="cls-2"/g, `fill="${BRAND_COLORS.secondary}"`);
 	const logo = new Image();
-	logo.src = Buffer.from(svg);
+	logo.src = readFileSync(assetUrl("jm-logo-vector.svg"));
 	if (!logo.complete || logo.width === 0 || logo.height === 0) {
 		throw new Error("Could not load required JobMatch chart logo asset");
 	}
@@ -248,18 +242,6 @@ function formatChartValue(value: unknown): string {
 	}
 	return String(value ?? "");
 }
-
-const whiteBackgroundPlugin: Plugin = {
-	id: "fabeeWhiteBackground",
-	beforeDraw: (chart) => {
-		const { ctx, height, width } = chart;
-		ctx.save();
-		ctx.globalCompositeOperation = "destination-over";
-		ctx.fillStyle = "#ffffff";
-		ctx.fillRect(0, 0, width, height);
-		ctx.restore();
-	},
-};
 
 const valueLabelsPlugin: Plugin = {
 	id: "fabeeValueLabels",
@@ -537,12 +519,10 @@ export function buildPieChartConfigFromRows(rows: Row[], rawSpec: unknown): Char
 }
 
 function configTitle(config: ChartConfiguration): string | undefined {
-	const title = (config.options?.plugins as Record<string, unknown> | undefined)?.title;
-	if (!title || typeof title !== "object") return undefined;
-	const text = (title as { text?: unknown }).text;
-	if (typeof text === "string") return text;
-	if (Array.isArray(text)) return text.map(String).join(" ");
-	return undefined;
+	const title = (config.options?.plugins as Record<string, unknown> | undefined)?.title as
+		| { text?: unknown }
+		| undefined;
+	return typeof title?.text === "string" ? title.text : undefined;
 }
 
 function drawFittedTitle(context: ReturnType<ReturnType<typeof createCanvas>["getContext"]>, title: string): void {
@@ -608,7 +588,7 @@ export function renderChartConfigToPng(
 	drawFittedTitle(context, title);
 
 	const logoWidth = 420;
-	context.drawImage(logo, width - 92 - logoWidth, 45, logoWidth, logoWidth / LOGO_ASPECT_RATIO);
+	context.drawImage(logo, width - 92 - logoWidth, 45, logoWidth, (logoWidth * logo.height) / logo.width);
 
 	const chartPlugins = (config.options?.plugins || {}) as Record<string, unknown>;
 	const legend = chartPlugins.legend as { display?: boolean; position?: string } | undefined;
@@ -630,7 +610,7 @@ export function renderChartConfigToPng(
 				...(hasTemplateLegend ? { legend: { ...(legend as object), display: false } } : {}),
 			},
 		},
-		plugins: [whiteBackgroundPlugin, valueLabelsPlugin, ...(config.plugins || [])],
+		plugins: [valueLabelsPlugin, ...(config.plugins || [])],
 	};
 	const chart = new Chart(chartContext as never, chartConfig);
 	chart.update();
@@ -735,8 +715,8 @@ export function createChartTool(sessionDir: string): AgentTool<typeof chartSchem
 				throw new Error("Exactly one of chartSpec or pieSpec must be provided.");
 			}
 			const rows = await readRowsFromJsonPath(inputPath);
-			const renderedWidth = normalizeTemplateDimension(width, DEFAULT_WIDTH, "width");
-			const renderedHeight = normalizeTemplateDimension(height, DEFAULT_HEIGHT, "height");
+			const renderedWidth = normalizeTemplateDimension(width, TEMPLATE_WIDTH, "width");
+			const renderedHeight = normalizeTemplateDimension(height, TEMPLATE_HEIGHT, "height");
 			const config = chartSpec
 				? buildChartConfigFromRows(rows, chartSpec)
 				: buildPieChartConfigFromRows(rows, pieSpec);

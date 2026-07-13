@@ -1,7 +1,6 @@
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createCanvas } from "@napi-rs/canvas";
 import { createChartTool } from "../dist/tools/chart.js";
 
 const sessionDir = await mkdtemp(join(tmpdir(), "fabee-chart-smoke-"));
@@ -40,8 +39,6 @@ const result = await tool.execute("chart-smoke", {
 	},
 	outputName: "applications-2026-by-month.png",
 	title: "Applications 2026 by month",
-	width: 1920,
-	height: 1080,
 });
 
 const png = await readFile(result.details.outputPath);
@@ -49,7 +46,6 @@ const magic = png.subarray(0, 8).toString("hex");
 if (magic !== "89504e470d0a1a0a") {
 	throw new Error(`Expected PNG magic header, got ${magic}`);
 }
-const canvas = createCanvas(1, 1);
 console.log(
 	JSON.stringify(
 		{
@@ -57,7 +53,6 @@ console.log(
 			node: process.version,
 			platform: process.platform,
 			arch: process.arch,
-			canvasAvailable: Boolean(canvas),
 			outputPath: result.details.outputPath,
 			pngBytes: png.length,
 			magic,

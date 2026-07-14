@@ -4,6 +4,7 @@
 
 - remove obsolete npm and Helm chart publishing surfaces from the container-only runtime repository
 - point deployment documentation at the canonical Flux repositories
+- record the resolved model and thinking level in completed run logs
 
 ## 0.1.32
 

@@ -437,6 +437,7 @@ export async function runWorker(
 		}
 	};
 	const model = resolveModelConfig(modelRegistry, resolvedRuntimeConfig);
+	const thinkingLevel = getWorkerThinkingLevel();
 	const memory = getMemory(resolvedRuntimeConfig);
 	const tools = await createWorkerTools({
 		executor,
@@ -500,7 +501,7 @@ export async function runWorker(
 		initialState: {
 			systemPrompt,
 			model,
-			thinkingLevel: getWorkerThinkingLevel(),
+			thinkingLevel,
 			tools,
 		},
 		convertToLlm,
@@ -696,6 +697,8 @@ export async function runWorker(
 			errorMessage,
 			finalText,
 			usage,
+			model: { provider: model.provider, id: model.id },
+			thinkingLevel,
 			timestamp: Date.now(),
 		});
 

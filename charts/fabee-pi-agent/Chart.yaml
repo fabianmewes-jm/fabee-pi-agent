@@ -1,6 +1,0 @@
-apiVersion: v2
-name: fabee-pi-agent
-description: Helm chart for a fabee-pi-agent deployment with bee-worker-sidecar
-type: application
-version: 0.1.21
-appVersion: "0.1.21"

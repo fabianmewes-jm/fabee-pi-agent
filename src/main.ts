@@ -1,5 +1,3 @@
-#!/usr/bin/env node
-
 import { loadWorkerRuntimeConfigFromEnv } from "./config.js";
 import { createWorkerBeeSocketServer } from "./rpc.js";
 

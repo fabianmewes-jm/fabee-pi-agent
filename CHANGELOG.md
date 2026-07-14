@@ -1,10 +1,11 @@
 # Changelog
 
-## 0.1.32
-
-- Better Charting tool with renderer JobMatch Template
-
 ## Unreleased
+
+- remove obsolete npm and Helm chart publishing surfaces from the container-only runtime repository
+- point deployment documentation at the canonical Flux repositories
+
+## 0.1.32
 
 - render charts in a fixed 1920×1080 JobMatch template with the CI palette, Wix Madefor Display, branded logo, and legal footer
 - align chart lines, bars, legends, axes, and grid styling with the Company Dashboard

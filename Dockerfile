@@ -39,13 +39,10 @@ RUN python3 -m venv /opt/bootstrap-venv \
 RUN addgroup -g 10001 -S app && adduser -S -D -H -u 10001 -G app -h /home/app app
 
 WORKDIR /app
-COPY --from=build /app/package*.json ./
+COPY --from=build /app/package.json ./package.json
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
-COPY --from=build /app/README.md ./README.md
-COPY --from=build /app/UPSTREAM.md ./UPSTREAM.md
 COPY --from=build /app/assets ./assets
-COPY --from=build /app/charts ./charts
 
 RUN mkdir -p /home/app /workspace /var/run/bee && chown -R 10001:10001 /home/app /workspace /var/run/bee /app
 

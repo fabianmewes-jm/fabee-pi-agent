@@ -1,14 +1,14 @@
-# `@fabianmewes-jm/fabee-pi-agent`
+# `fabee-pi-agent`
 
-`@fabianmewes-jm/fabee-pi-agent` is the forked npm package for the
-`bee-pi-agent` Bee Dance speaking worker runtime. It executes coding-agent
-turns over a local Unix socket.
+`fabee-pi-agent` is a Bee Dance speaking worker runtime. It executes
+coding-agent turns over a local Unix socket and is distributed as a container
+image.
 
 It is intended to sit behind `@jobmatchme/bee-worker-sidecar`: the agent speaks
 Bee Dance envelopes locally, while the sidecar handles NATS-facing transport and
 subject routing.
 
-## What this package does
+## What this runtime does
 
 - listens on a Unix socket for framed Bee Dance envelopes
 - responds to `protocol.hello` with `protocol.welcome`
@@ -17,7 +17,7 @@ subject routing.
 - emits Bee Dance event envelopes such as `run.started`, `item.appended`,
   `item.updated`, `run.completed`, and `run.failed`
 
-## What this package does not do
+## What this runtime does not do
 
 - no direct NATS connection
 - no Slack transport or gateway responsibilities
@@ -29,13 +29,6 @@ The package is the local execution half of a two-container pod shape:
 
 - `bee-pi-agent` owns agent execution and local state
 - `bee-worker-sidecar` owns NATS connectivity and Bee subject routing
-
-In this fork, the published npm package name is
-`@fabianmewes-jm/fabee-pi-agent`, while the runtime binary and several runtime
-identifiers still use the established `bee-pi-agent` naming.
-
-That keeps the agent reusable for deployments that want Bee Dance semantics
-without forcing every worker implementation to speak NATS directly.
 
 ## Upstream provenance
 
@@ -149,7 +142,9 @@ BEE_PI_AGENT_DBT_PROJECT_DIR=/path/to/dbt-project
 BEE_PI_AGENT_DBT_PROFILES_DIR=/path/to/dbt-profiles-dir
 ```
 
-In JobMatch Kubernetes deployments, Analytics dbt credentials are provided by Flux infra (for example via `analytics-db-credentials`); this app chart does not create them.
+In JobMatch Kubernetes deployments, Analytics dbt credentials are provided by
+Flux infrastructure (for example via `analytics-db-credentials`); the
+deployment chart does not create them.
 
 The older `PI_AGENT_WORKER_*` variable names are accepted as fallbacks for the Company Briefing settings as well.
 
@@ -161,30 +156,18 @@ A Dockerfile is included for runtime image builds. Build it locally with:
 docker build -t fabee-pi-agent:local .
 ```
 
-In this fork, the Docker image is built directly from the repository source.
-The release flow does not require publishing the npm package first.
+The Docker image is built directly from the repository source and published to
+GHCR. The version in `package.json` remains the source for the image tag; no npm
+package is published.
 
 The image is designed to be paired with `bee-worker-sidecar` in the same pod.
 
-## Helm chart
+## Deployment
 
-This repo currently still contains a reusable Helm chart under
-[`charts/fabee-pi-agent`](./charts/fabee-pi-agent).
-The chart deploys:
-
-- one `bee-pi-agent` container
-- one `bee-worker-sidecar` container
-- optional `fabee-log-exporter` and `fabee-log-read-api` sidecars
-- one shared socket volume mounted at `/var/run/bee`
-
-`logReadApi` is disabled by default. When enabled it mounts the shared workspace,
-serves `/health` plus the read API on the configured port, and expects
-`logReadApi.bearerTokenSecretName` / `logReadApi.bearerTokenSecretKey` for auth.
-
-It also supports the same workspace, auth, and git bootstrap patterns that were
-used in the earlier `pi-agent-worker` deployment.
-
-Note: the chart packaging in this repository now uses `fabee-pi-agent`, while runtime identifiers and several defaults still intentionally use established `bee-pi-agent` naming for compatibility.
+The reusable Helm chart is maintained in
+[`flux-infrastructure`](https://gitlab.com/jobmatchme/backend/flux-infrastructure/-/tree/main/k8s/ai-agents/charts/fabee-pi-agent).
+Cluster-specific image tags and configuration are maintained in
+[`flux-clusters-dev`](https://gitlab.com/jobmatchme/backend/flux-clusters-dev/-/tree/main/clusters/bici/ai-agents).
 
 ## License
 

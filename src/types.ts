@@ -31,6 +31,7 @@ export interface WorkerActorInput {
 	userId: string;
 	userName?: string;
 	displayName?: string;
+	email?: string;
 }
 
 export interface WorkerConversationInput {

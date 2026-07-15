@@ -189,7 +189,7 @@ describe("createWorkerBeePeer", () => {
 						input: [{ kind: "text", text: "Inspect the worker." }],
 						hints: {
 							conversationId: "slack:T123:C123:1711111111_000100",
-							actor: { userId: "U123", userName: "gunnar" },
+							actor: { userId: "U123", userName: "gunnar", email: "gunnar@example.com" },
 						},
 					},
 				}),
@@ -207,7 +207,7 @@ describe("createWorkerBeePeer", () => {
 					conversation: expect.objectContaining({
 						conversationId: "slack:T123:C123:1711111111_000100",
 					}),
-					actor: expect.objectContaining({ userId: "U123", userName: "gunnar" }),
+					actor: expect.objectContaining({ userId: "U123", userName: "gunnar", email: "gunnar@example.com" }),
 					message: { text: "Inspect the worker." },
 				}),
 				expect.objectContaining({ workspace: expect.objectContaining({ rootDir: expect.any(String) }) }),

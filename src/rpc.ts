@@ -345,6 +345,14 @@ function mapEventToBeeEnvelopes(
 			];
 		case "run.completed":
 			return [
+				...(event.finalText
+					? [
+							createItemEventEnvelope(activeRun, requester, "item.appended", {
+								eventType: "item.appended",
+								item: createTextItem(`${activeRun.turnId}:assistant`, "message", event.finalText),
+							}),
+						]
+					: []),
 				createRunEventEnvelope(activeRun, requester, "run.completed", {
 					eventType: "run.completed",
 					stopReason: event.stopReason,
@@ -359,7 +367,7 @@ function mapEventToBeeEnvelopes(
 			];
 		case "assistant.message": {
 			if (!activeRun.assistantItemId) {
-				activeRun.assistantItemId = `item_${randomUUID()}`;
+				activeRun.assistantItemId = `${activeRun.turnId}:assistant`;
 				return [
 					createItemEventEnvelope(activeRun, requester, "item.appended", {
 						eventType: "item.appended",

@@ -196,7 +196,7 @@ describe("createWorkerBeePeer", () => {
 			);
 
 			await vi.waitFor(() => {
-				expect(server.messages.length).toBe(4);
+				expect(server.messages.length).toBe(5);
 			});
 
 			expect(runWorkerMock).toHaveBeenCalledWith(
@@ -242,6 +242,18 @@ describe("createWorkerBeePeer", () => {
 						eventType: "item.updated",
 						itemId: expect.any(String),
 						appendParts: [{ kind: "text", text: " plus update" }],
+					}),
+				}),
+				expect.objectContaining({
+					type: "event",
+					name: "item.appended",
+					turnId: "turn-123",
+					payload: expect.objectContaining({
+						eventType: "item.appended",
+						item: expect.objectContaining({
+							id: "turn-123:assistant",
+							parts: [{ kind: "text", text: "done plus update" }],
+						}),
 					}),
 				}),
 				expect.objectContaining({

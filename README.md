@@ -169,6 +169,15 @@ The reusable Helm chart is maintained in
 Cluster-specific image tags and configuration are maintained in
 [`flux-clusters-dev`](https://gitlab.com/jobmatchme/backend/flux-clusters-dev/-/tree/main/clusters/bici/ai-agents).
 
+For the one-time Shared Desk rollout cleanup, first review a dry run and then
+execute it explicitly. The script only selects legacy `fabee-pi-agent:web:*`
+session directories and run logs whose `run.requested.sessionId` has that prefix:
+
+```bash
+node scripts/cleanup-legacy-web-sessions.mjs /workspace/.fabee-pi-agent
+node scripts/cleanup-legacy-web-sessions.mjs /workspace/.fabee-pi-agent --execute
+```
+
 ## License
 
 MIT

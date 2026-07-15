@@ -366,6 +366,42 @@ function appendJsonlLine(targetPath: string, value: unknown): Promise<void> {
 	return appendFile(targetPath, `${JSON.stringify(value)}\n`, "utf-8");
 }
 
+export function createRunRequestedLogEntry(
+	request: InternalWorkerRunRequest,
+	userMessage: string,
+	timestamp = Date.now(),
+) {
+	return {
+		type: "run.requested",
+		runId: request.runId,
+		sessionId: request.sessionId,
+		actor: {
+			userId: request.actor.userId,
+			userName: request.actor.userName,
+			displayName: request.actor.displayName,
+			email: request.actor.email,
+		},
+		prompt: request.message.text,
+		userMessage,
+		timestamp,
+	};
+}
+
+export function createArtifactCreatedLogEntry(
+	runId: string,
+	sessionId: string,
+	artifact: WorkerArtifactRef,
+	timestamp = Date.now(),
+) {
+	return {
+		type: "artifact.created",
+		runId,
+		sessionId,
+		...artifact,
+		timestamp,
+	};
+}
+
 function assertRunRequest(request: unknown): asserts request is InternalWorkerRunRequest {
 	if (!request || typeof request !== "object") throw new Error("Request body must be a JSON object");
 	const candidate = request as Partial<InternalWorkerRunRequest>;
@@ -451,6 +487,10 @@ export async function runWorker(
 				title: input.title,
 				mimeType: input.mimeType,
 			});
+			await appendJsonlLine(
+				requestLogPath,
+				createArtifactCreatedLogEntry(request.runId, request.sessionId, artifact),
+			);
 			pendingArtifacts.push(artifact);
 		},
 		request,
@@ -630,13 +670,7 @@ export async function runWorker(
 	}
 
 	const userMessage = formatUserMessage(request, nonImagePaths);
-	await appendJsonlLine(requestLogPath, {
-		type: "run.requested",
-		runId: request.runId,
-		sessionId: request.sessionId,
-		userMessage,
-		timestamp: Date.now(),
-	});
+	await appendJsonlLine(requestLogPath, createRunRequestedLogEntry(request, userMessage));
 
 	await emit(eventSink, {
 		type: "run.started",

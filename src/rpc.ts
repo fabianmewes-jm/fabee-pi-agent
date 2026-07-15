@@ -563,6 +563,7 @@ function isWorkerActorInput(value: unknown): value is WorkerActorInput {
 		typeof value === "object" &&
 		value !== null &&
 		"userId" in value &&
-		typeof (value as { userId?: unknown }).userId === "string"
+		typeof (value as { userId?: unknown }).userId === "string" &&
+		(!("email" in value) || typeof (value as { email?: unknown }).email === "string")
 	);
 }

@@ -19,9 +19,9 @@
 		"prepare": "husky"
 	},
 	"dependencies": {
-		"@earendil-works/pi-agent-core": "^0.80.6",
-		"@earendil-works/pi-ai": "^0.80.6",
-		"@earendil-works/pi-coding-agent": "^0.80.6",
+		"@earendil-works/pi-agent-core": "^0.83.0",
+		"@earendil-works/pi-ai": "^0.83.0",
+		"@earendil-works/pi-coding-agent": "^0.83.0",
 		"@jobmatchme/bee-dance-core": "0.1.5",
 		"@jobmatchme/bee-dance-schema": "0.2.3",
 		"@napi-rs/canvas": "^1.0.0",

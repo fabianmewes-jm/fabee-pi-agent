@@ -2,10 +2,9 @@ import { Agent, type AgentEvent, type AgentTool, type ThinkingLevel } from "@ear
 import type { Api, ImageContent, Model } from "@earendil-works/pi-ai";
 import {
 	AgentSession,
-	AuthStorage,
 	convertToLlm,
 	DefaultResourceLoader,
-	ModelRegistry,
+	ModelRuntime,
 	SessionManager,
 } from "@earendil-works/pi-coding-agent";
 import { existsSync, mkdirSync, readFileSync } from "fs";
@@ -67,7 +66,7 @@ function getWorkerAuthPath(): string {
 	return workerAuthPath;
 }
 
-function resolveModelConfig(modelRegistry: ModelRegistry, runtimeConfig: WorkerRuntimeConfig): Model<Api> {
+function resolveModelConfig(modelRuntime: ModelRuntime, runtimeConfig: WorkerRuntimeConfig): Model<Api> {
 	const explicitProvider =
 		runtimeConfig.model?.provider ||
 		process.env.BEE_PI_AGENT_MODEL_PROVIDER ||
@@ -80,7 +79,7 @@ function resolveModelConfig(modelRegistry: ModelRegistry, runtimeConfig: WorkerR
 		process.env.MOM_MODEL_ID;
 
 	const resolveModelConfigById = (provider: string, modelId: string) => {
-		const resolved = modelRegistry.find(provider, modelId);
+		const resolved = modelRuntime.getModel(provider, modelId);
 		if (!resolved) {
 			throw new Error(`Configured model not found: provider=${provider}, model=${modelId}`);
 		}
@@ -122,7 +121,7 @@ function resolveModelConfig(modelRegistry: ModelRegistry, runtimeConfig: WorkerR
 		process.env.MOM_OPENAI_MODEL ||
 		process.env.OPENAI_MODEL ||
 		DEFAULT_OPENAI_MODEL;
-	if (modelRegistry.authStorage.hasAuth(DEFAULT_OPENAI_CODEX_PROVIDER)) {
+	if (modelRuntime.hasConfiguredAuth(DEFAULT_OPENAI_CODEX_PROVIDER)) {
 		return resolveModelConfigById(
 			DEFAULT_OPENAI_CODEX_PROVIDER,
 			process.env.BEE_PI_AGENT_OPENAI_MODEL ||
@@ -133,28 +132,11 @@ function resolveModelConfig(modelRegistry: ModelRegistry, runtimeConfig: WorkerR
 		);
 	}
 
-	if (modelRegistry.authStorage.hasAuth(DEFAULT_OPENAI_PROVIDER)) {
+	if (modelRuntime.hasConfiguredAuth(DEFAULT_OPENAI_PROVIDER)) {
 		return resolveModelConfigById(DEFAULT_OPENAI_PROVIDER, openAiModelId);
 	}
 
 	return resolveModelConfigById(DEFAULT_ANTHROPIC_PROVIDER, DEFAULT_ANTHROPIC_MODEL);
-}
-
-async function getModelApiKey(modelRegistry: ModelRegistry, model: Model<Api>, authPath: string): Promise<string> {
-	const auth = await modelRegistry.getApiKeyAndHeaders(model);
-	if (!auth.ok) {
-		throw new Error(
-			`${auth.error}\n\n` +
-				`Configure credentials via environment/auth file, or login with npx @earendil-works/pi-ai login ${model.provider} and store the resulting auth.json at ${authPath}`,
-		);
-	}
-	if (!auth.apiKey) {
-		throw new Error(
-			`No API key found for ${model.provider}.\n\n` +
-				`Configure credentials via environment/auth file, or login with npx @earendil-works/pi-ai login ${model.provider} and store the resulting auth.json at ${authPath}`,
-		);
-	}
-	return auth.apiKey;
 }
 
 function getNonNegativeIntegerEnvironmentValue(name: string, defaultValue: number): number {
@@ -464,8 +446,10 @@ export async function runWorker(
 	const visibleWorkspacePath = executor.getWorkspacePath(workspaceRoot);
 	const authPath = getWorkerAuthPath();
 	const agentDir = dirname(authPath);
-	const authStorage = AuthStorage.create(authPath);
-	const modelRegistry = ModelRegistry.create(authStorage, join(agentDir, "models.json"));
+	const modelRuntime = await ModelRuntime.create({
+		authPath,
+		modelsPath: join(agentDir, "models.json"),
+	});
 	const resolvedRuntimeConfig: WorkerRuntimeConfig = {
 		...runtimeConfig,
 		workspace: {
@@ -485,7 +469,7 @@ export async function runWorker(
 			await emit(eventSink, { type: "artifact.created", runId: request.runId, artifact });
 		}
 	};
-	const model = resolveModelConfig(modelRegistry, resolvedRuntimeConfig);
+	const model = resolveModelConfig(modelRuntime, resolvedRuntimeConfig);
 	const thinkingLevel = getWorkerThinkingLevel();
 	const memory = getMemory(resolvedRuntimeConfig);
 	const tools = await createWorkerTools({
@@ -564,7 +548,7 @@ export async function runWorker(
 			tools,
 		},
 		convertToLlm,
-		getApiKey: async () => getModelApiKey(modelRegistry, model, authPath),
+		streamFn: (streamModel, context, options) => modelRuntime.streamSimple(streamModel, context, options),
 	});
 
 	const loadedSession = sessionManager.buildSessionContext();
@@ -578,7 +562,7 @@ export async function runWorker(
 		sessionManager,
 		settingsManager,
 		cwd: workingDir,
-		modelRegistry,
+		modelRuntime,
 		resourceLoader,
 		baseToolsOverride,
 	});

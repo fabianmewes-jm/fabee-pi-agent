@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.38
+
+- Bumped to pi version 0.83.0
+
 ## 0.1.37
 
 - include configurable automatic retries for transient model errors

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.37
+
+- include configurable automatic retries for transient model errors
+
 ## 0.1.36
 
 - retry transient model failures

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.36
+
+- retry transient model failures
+
 ## 0.1.33
 
 - Deleted unrelevant sources, added record model metadata for completed runs

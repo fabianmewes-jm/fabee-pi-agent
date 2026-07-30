@@ -85,10 +85,18 @@ export function syncLogToSessionManager(
 
 type WorkerSettingsStorage = Parameters<typeof SettingsManager.fromStorage>[0];
 
+export interface WorkerRetrySettings {
+	maxRetries: number;
+	baseDelayMs: number;
+}
+
 class WorkspaceSettingsStorage implements WorkerSettingsStorage {
 	private settingsPath: string;
 
-	constructor(workspaceDir: string) {
+	constructor(
+		workspaceDir: string,
+		private retrySettings?: WorkerRetrySettings,
+	) {
 		this.settingsPath = join(workspaceDir, "settings.json");
 	}
 
@@ -98,7 +106,8 @@ class WorkspaceSettingsStorage implements WorkerSettingsStorage {
 			return;
 		}
 
-		const current = existsSync(this.settingsPath) ? readFileSync(this.settingsPath, "utf-8") : undefined;
+		const stored = existsSync(this.settingsPath) ? readFileSync(this.settingsPath, "utf-8") : undefined;
+		const current = this.retrySettings ? applyRetrySettings(stored, this.retrySettings) : stored;
 		const next = fn(current);
 		if (next === undefined) return;
 
@@ -110,8 +119,26 @@ class WorkspaceSettingsStorage implements WorkerSettingsStorage {
 	}
 }
 
-export function createWorkerSettingsManager(workspaceDir: string): SettingsManager {
-	return SettingsManager.fromStorage(new WorkspaceSettingsStorage(workspaceDir));
+function applyRetrySettings(current: string | undefined, retrySettings: WorkerRetrySettings): string {
+	const parsed = current ? (JSON.parse(current) as Record<string, unknown>) : {};
+	const existingRetry =
+		typeof parsed.retry === "object" && parsed.retry !== null ? (parsed.retry as Record<string, unknown>) : {};
+	return JSON.stringify({
+		...parsed,
+		retry: {
+			...existingRetry,
+			enabled: true,
+			maxRetries: retrySettings.maxRetries,
+			baseDelayMs: retrySettings.baseDelayMs,
+		},
+	});
+}
+
+export function createWorkerSettingsManager(
+	workspaceDir: string,
+	retrySettings?: WorkerRetrySettings,
+): SettingsManager {
+	return SettingsManager.fromStorage(new WorkspaceSettingsStorage(workspaceDir, retrySettings));
 }
 
 export function readWorkerSessionTranscript(

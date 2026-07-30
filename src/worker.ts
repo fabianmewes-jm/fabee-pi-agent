@@ -34,6 +34,8 @@ const DEFAULT_OPENAI_MODEL = "gpt-5.5";
 const DEFAULT_OPENAI_CODEX_PROVIDER = "openai-codex";
 const DEFAULT_OPENAI_CODEX_MODEL = "gpt-5.6-sol";
 const DEFAULT_THINKING_LEVEL: ThinkingLevel = "medium";
+const DEFAULT_RETRY_MAX_RETRIES = 6;
+const DEFAULT_RETRY_BASE_DELAY_MS = 2_000;
 const THINKING_LEVELS = new Set<ThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh"]);
 
 const IMAGE_MIME_TYPES: Record<string, string> = {
@@ -153,6 +155,17 @@ async function getModelApiKey(modelRegistry: ModelRegistry, model: Model<Api>, a
 		);
 	}
 	return auth.apiKey;
+}
+
+function getNonNegativeIntegerEnvironmentValue(name: string, defaultValue: number): number {
+	const configured = process.env[name];
+	if (configured === undefined || configured === "") return defaultValue;
+
+	const parsed = Number(configured);
+	if (!Number.isSafeInteger(parsed) || parsed < 0) {
+		throw new Error(`Invalid ${name} ${configured}. Expected a non-negative integer.`);
+	}
+	return parsed;
 }
 
 function getWorkerThinkingLevel(): ThinkingLevel {
@@ -504,7 +517,13 @@ export async function runWorker(
 
 	const contextFile = join(sessionDir, "context.jsonl");
 	const sessionManager = SessionManager.open(contextFile, workingDir);
-	const settingsManager = createWorkerSettingsManager(stateDir);
+	const settingsManager = createWorkerSettingsManager(stateDir, {
+		maxRetries: getNonNegativeIntegerEnvironmentValue("BEE_PI_AGENT_RETRY_MAX_RETRIES", DEFAULT_RETRY_MAX_RETRIES),
+		baseDelayMs: getNonNegativeIntegerEnvironmentValue(
+			"BEE_PI_AGENT_RETRY_BASE_DELAY_MS",
+			DEFAULT_RETRY_BASE_DELAY_MS,
+		),
+	});
 	const workspaceSkillsDir =
 		resolvedRuntimeConfig.workspace.skillsDir || join(resolvedRuntimeConfig.workspace.rootDir, "skills");
 	const resourceLoader = new DefaultResourceLoader({
@@ -620,7 +639,7 @@ export async function runWorker(
 
 			const assistantMsg = agentEvent.message as any;
 			if (assistantMsg.stopReason) stopReason = assistantMsg.stopReason;
-			if (assistantMsg.errorMessage) errorMessage = assistantMsg.errorMessage;
+			errorMessage = assistantMsg.errorMessage || undefined;
 
 			// Do not forward intermediate assistant/thinking messages to the gateway.
 			// The final assistant answer is emitted once after session.prompt() completes.

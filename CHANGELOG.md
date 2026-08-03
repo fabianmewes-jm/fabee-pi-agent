@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.39
+
+- persist session-scoped artifact metadata and explicit message references
+
 ## 0.1.38
 
 - Bumped to pi version 0.83.0

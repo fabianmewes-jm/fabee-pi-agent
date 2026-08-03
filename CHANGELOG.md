@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.40
+
+- preserve image MIME types for artifact previews
+
 ## 0.1.39
 
 - persist session-scoped artifact metadata and explicit message references

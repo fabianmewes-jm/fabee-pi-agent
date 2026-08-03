@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { Agent, type AgentEvent, type AgentTool, type ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Api, ImageContent, Model } from "@earendil-works/pi-ai";
 import {
@@ -19,6 +20,7 @@ import { createWorkerTools } from "./tools/index.js";
 import type {
 	InternalWorkerRunRequest,
 	WorkerArtifactRef,
+	WorkerArtifactReference,
 	WorkerEventSink,
 	WorkerRunEvent,
 	WorkerRunRequest,
@@ -361,6 +363,37 @@ function appendJsonlLine(targetPath: string, value: unknown): Promise<void> {
 	return appendFile(targetPath, `${JSON.stringify(value)}\n`, "utf-8");
 }
 
+export function createArtifactRegisteredEntry(
+	sessionId: string,
+	artifact: WorkerArtifactRef,
+	createdByTurnId: string,
+	createdAt = new Date().toISOString(),
+) {
+	return {
+		type: "artifact.registered",
+		artifactId: artifact.artifactId,
+		sessionId,
+		blobKey: artifact.blobKey,
+		...(artifact.name ? { name: artifact.name } : {}),
+		...(artifact.title ? { title: artifact.title } : {}),
+		...(artifact.mimeType ? { mimeType: artifact.mimeType } : {}),
+		...(artifact.sizeBytes !== undefined ? { sizeBytes: artifact.sizeBytes } : {}),
+		createdAt,
+		createdByTurnId,
+	};
+}
+
+export function createArtifactReferenceEntry(reference: WorkerArtifactReference) {
+	return {
+		type: "artifactRef",
+		referenceId: reference.referenceId,
+		artifactId: reference.artifactId,
+		turnId: reference.turnId,
+		messageId: reference.messageId,
+		timestamp: reference.createdAt,
+	};
+}
+
 export function createRunRequestedLogEntry(
 	request: InternalWorkerRunRequest,
 	userMessage: string,
@@ -423,6 +456,7 @@ export async function runWorker(
 	const sessionDir = join(stateDir, "sessions", request.sessionId);
 	const logDir = join(stateDir, "logs");
 	const requestLogPath = join(logDir, `${request.runId}.jsonl`);
+	const artifactsLogPath = join(sessionDir, "artifacts.jsonl");
 
 	mkdirSync(sessionDir, { recursive: true });
 	mkdirSync(logDir, { recursive: true });
@@ -464,9 +498,21 @@ export async function runWorker(
 	};
 	const blobStore = createWorkerBlobStore(resolvedRuntimeConfig);
 	const pendingArtifacts: WorkerArtifactRef[] = [];
-	const flushPendingArtifacts = async () => {
+	const flushPendingArtifacts = async (messageId: string) => {
+		const referencedArtifacts: Array<{ artifact: WorkerArtifactRef; reference: WorkerArtifactReference }> = [];
 		for (const artifact of pendingArtifacts.splice(0)) {
-			await emit(eventSink, { type: "artifact.created", runId: request.runId, artifact });
+			const reference: WorkerArtifactReference = {
+				referenceId: randomUUID(),
+				artifactId: artifact.artifactId,
+				turnId: request.turnId || request.runId,
+				messageId,
+				createdAt: new Date().toISOString(),
+			};
+			await appendJsonlLine(artifactsLogPath, createArtifactReferenceEntry(reference));
+			referencedArtifacts.push({ artifact, reference });
+		}
+		for (const { artifact, reference } of referencedArtifacts) {
+			await emit(eventSink, { type: "artifact.created", runId: request.runId, artifact, reference });
 		}
 	};
 	const model = resolveModelConfig(modelRuntime, resolvedRuntimeConfig);
@@ -484,6 +530,11 @@ export async function runWorker(
 				title: input.title,
 				mimeType: input.mimeType,
 			});
+			const registeredAt = new Date().toISOString();
+			await appendJsonlLine(
+				artifactsLogPath,
+				createArtifactRegisteredEntry(request.sessionId, artifact, request.turnId || request.runId, registeredAt),
+			);
 			await appendJsonlLine(
 				requestLogPath,
 				createArtifactCreatedLogEntry(request.runId, request.sessionId, artifact),
@@ -719,6 +770,10 @@ export async function runWorker(
 		await session.prompt(userMessage, imageAttachments.length > 0 ? { images: imageAttachments } : undefined);
 
 		const messages = session.messages;
+		const lastAssistantEntry = [...sessionManager.getEntries()]
+			.reverse()
+			.find((entry) => entry.type === "message" && (entry as any).message?.role === "assistant");
+		const finalAssistantMessageId = lastAssistantEntry?.id;
 		const lastAssistant = [...messages].reverse().find((message) => message.role === "assistant");
 		const finalText =
 			lastAssistant?.content
@@ -745,16 +800,24 @@ export async function runWorker(
 		}
 
 		if (finalText.trim()) {
-			await emit(eventSink, { type: "assistant.message", runId: request.runId, text: finalText });
+			await emit(eventSink, {
+				type: "assistant.message",
+				runId: request.runId,
+				text: finalText,
+				messageId: finalAssistantMessageId,
+			});
 		}
 
-		await flushPendingArtifacts();
+		if (finalAssistantMessageId) {
+			await flushPendingArtifacts(finalAssistantMessageId);
+		}
 
 		await emit(eventSink, {
 			type: "run.completed",
 			runId: request.runId,
 			stopReason,
 			finalText,
+			messageId: finalAssistantMessageId,
 			usage,
 		});
 	} catch (error) {

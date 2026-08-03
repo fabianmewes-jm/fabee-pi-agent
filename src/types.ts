@@ -61,6 +61,14 @@ export interface WorkerArtifactRef {
 	sizeBytes?: number;
 }
 
+export interface WorkerArtifactReference {
+	referenceId: string;
+	artifactId: string;
+	turnId: string;
+	messageId: string;
+	createdAt: string;
+}
+
 export interface WorkerRunRequest {
 	sessionId: string;
 	threadId?: string;
@@ -120,8 +128,8 @@ export type WorkerRunEvent =
 			args?: Record<string, unknown>;
 	  }
 	| { type: "assistant.thinking"; runId: string; text: string }
-	| { type: "assistant.message"; runId: string; text: string }
-	| { type: "artifact.created"; runId: string; artifact: WorkerArtifactRef }
+	| { type: "assistant.message"; runId: string; text: string; messageId?: string }
+	| { type: "artifact.created"; runId: string; artifact: WorkerArtifactRef; reference?: WorkerArtifactReference }
 	| { type: "run.compaction"; runId: string; message: string }
 	| { type: "run.retrying"; runId: string; message: string }
 	| {
@@ -129,6 +137,7 @@ export type WorkerRunEvent =
 			runId: string;
 			stopReason?: string;
 			finalText?: string;
+			messageId?: string;
 			usage?: WorkerUsageSummary;
 	  }
 	| { type: "run.failed"; runId: string; error: string };

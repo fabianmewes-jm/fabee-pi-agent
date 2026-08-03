@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { InternalWorkerRunRequest, WorkerArtifactRef } from "../src/types.js";
-import { createArtifactCreatedLogEntry, createRunRequestedLogEntry } from "../src/worker.js";
+import {
+	createArtifactCreatedLogEntry,
+	createArtifactReferenceEntry,
+	createArtifactRegisteredEntry,
+	createRunRequestedLogEntry,
+} from "../src/worker.js";
 
 describe("worker persistence log entries", () => {
 	it("keeps the raw prompt and structured actor email on run.requested", () => {
@@ -49,6 +54,45 @@ describe("worker persistence log entries", () => {
 			sessionId: "ses_1",
 			...artifact,
 			timestamp: 456,
+		});
+	});
+
+	it("creates append-only artifact registry and reference entries", () => {
+		const artifact: WorkerArtifactRef = {
+			artifactId: "artifact-1",
+			blobKey: "artifacts/session/run/chart.png",
+			name: "chart.png",
+			mimeType: "image/png",
+			sizeBytes: 42,
+		};
+
+		expect(createArtifactRegisteredEntry("session-1", artifact, "turn-1", "2026-08-03T12:00:00.000Z")).toEqual({
+			type: "artifact.registered",
+			artifactId: "artifact-1",
+			sessionId: "session-1",
+			blobKey: "artifacts/session/run/chart.png",
+			name: "chart.png",
+			mimeType: "image/png",
+			sizeBytes: 42,
+			createdAt: "2026-08-03T12:00:00.000Z",
+			createdByTurnId: "turn-1",
+		});
+
+		expect(
+			createArtifactReferenceEntry({
+				referenceId: "ref-1",
+				artifactId: "artifact-1",
+				turnId: "turn-1",
+				messageId: "msg-1",
+				createdAt: "2026-08-03T12:01:00.000Z",
+			}),
+		).toEqual({
+			type: "artifactRef",
+			referenceId: "ref-1",
+			artifactId: "artifact-1",
+			turnId: "turn-1",
+			messageId: "msg-1",
+			timestamp: "2026-08-03T12:01:00.000Z",
 		});
 	});
 });

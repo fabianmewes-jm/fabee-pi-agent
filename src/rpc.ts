@@ -343,13 +343,18 @@ function mapEventToBeeEnvelopes(
 					workspaceDir: event.workspaceDir,
 				}),
 			];
-		case "run.completed":
+		case "run.completed": {
+			const shouldAppendFinalText = Boolean(event.finalText && !activeRun.assistantItemId);
+			const assistantItemId = event.messageId || `${activeRun.turnId}:assistant`;
+			if (shouldAppendFinalText) {
+				activeRun.assistantItemId = assistantItemId;
+			}
 			return [
-				...(event.finalText
+				...(shouldAppendFinalText
 					? [
 							createItemEventEnvelope(activeRun, requester, "item.appended", {
 								eventType: "item.appended",
-								item: createTextItem(`${activeRun.turnId}:assistant`, "message", event.finalText),
+								item: createTextItem(assistantItemId, "message", event.finalText || ""),
 							}),
 						]
 					: []),
@@ -358,6 +363,7 @@ function mapEventToBeeEnvelopes(
 					stopReason: event.stopReason,
 				}),
 			];
+		}
 		case "run.failed":
 			return [
 				createRunEventEnvelope(activeRun, requester, "run.failed", {
@@ -367,7 +373,7 @@ function mapEventToBeeEnvelopes(
 			];
 		case "assistant.message": {
 			if (!activeRun.assistantItemId) {
-				activeRun.assistantItemId = `${activeRun.turnId}:assistant`;
+				activeRun.assistantItemId = event.messageId || `${activeRun.turnId}:assistant`;
 				return [
 					createItemEventEnvelope(activeRun, requester, "item.appended", {
 						eventType: "item.appended",
@@ -385,18 +391,20 @@ function mapEventToBeeEnvelopes(
 		}
 		case "assistant.thinking":
 			return [];
-		case "artifact.created":
-			return [
-				createItemEventEnvelope(activeRun, requester, "item.appended", {
-					eventType: "item.appended",
-					item: {
-						id: `item_${randomUUID()}`,
-						kind: "artifact",
-						role: "assistant",
-						parts: [createArtifactRefPart(event.artifact, runtimeConfig)],
-					},
-				}),
-			];
+		case "artifact.created": {
+			const envelope = createItemEventEnvelope(activeRun, requester, "item.appended", {
+				eventType: "item.appended",
+				item: {
+					id: event.reference?.referenceId || `item_${randomUUID()}`,
+					kind: "artifact",
+					role: "assistant",
+					parts: [createArtifactRefPart(event.artifact, runtimeConfig)],
+					...(event.reference ? { references: [event.reference.messageId] } : {}),
+				},
+			});
+			if (event.reference) envelope.time = event.reference.createdAt;
+			return [envelope];
+		}
 		case "tool.started":
 			return activeRun.transport === "web"
 				? [

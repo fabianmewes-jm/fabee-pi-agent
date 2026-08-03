@@ -167,6 +167,7 @@ describe("createWorkerBeePeer", () => {
 					runId: request.runId,
 					stopReason: "completed",
 					finalText: "done plus update",
+					messageId: "persisted-msg-123",
 				});
 			},
 		);
@@ -196,7 +197,7 @@ describe("createWorkerBeePeer", () => {
 			);
 
 			await vi.waitFor(() => {
-				expect(server.messages.length).toBe(5);
+				expect(server.messages.length).toBe(4);
 			});
 
 			expect(runWorkerMock).toHaveBeenCalledWith(
@@ -246,18 +247,6 @@ describe("createWorkerBeePeer", () => {
 				}),
 				expect.objectContaining({
 					type: "event",
-					name: "item.appended",
-					turnId: "turn-123",
-					payload: expect.objectContaining({
-						eventType: "item.appended",
-						item: expect.objectContaining({
-							id: "turn-123:assistant",
-							parts: [{ kind: "text", text: "done plus update" }],
-						}),
-					}),
-				}),
-				expect.objectContaining({
-					type: "event",
 					name: "run.completed",
 					turnId: "turn-123",
 					payload: { eventType: "run.completed", stopReason: "completed" },
@@ -279,7 +268,24 @@ describe("createWorkerBeePeer", () => {
 					title: "likes.png",
 					mimeType: "image/png",
 				});
-				await sink({ type: "artifact.created", runId: request.runId, artifact });
+				await sink({
+					type: "assistant.message",
+					runId: request.runId,
+					text: "Here is the chart.",
+					messageId: "persisted-assistant-message",
+				});
+				await sink({
+					type: "artifact.created",
+					runId: request.runId,
+					artifact,
+					reference: {
+						referenceId: "ref-artifact",
+						artifactId: artifact.artifactId,
+						turnId: request.turnId || request.runId,
+						messageId: "persisted-assistant-message",
+						createdAt: "2026-08-03T12:02:00.000Z",
+					},
+				});
 				await sink({ type: "run.completed", runId: request.runId, stopReason: "completed" });
 			},
 		);
@@ -305,16 +311,33 @@ describe("createWorkerBeePeer", () => {
 			);
 
 			await vi.waitFor(() => {
-				expect(server.messages.length).toBe(2);
+				expect(server.messages.length).toBe(3);
 			});
 
 			expect(server.messages[0]).toMatchObject({
 				type: "event",
 				name: "item.appended",
+				turnId: "turn-artifact",
 				payload: {
 					eventType: "item.appended",
 					item: {
+						id: "persisted-assistant-message",
+						kind: "message",
+						parts: [{ kind: "text", text: "Here is the chart." }],
+					},
+				},
+			});
+			expect(server.messages[1]).toMatchObject({
+				type: "event",
+				name: "item.appended",
+				turnId: "turn-artifact",
+				time: "2026-08-03T12:02:00.000Z",
+				payload: {
+					eventType: "item.appended",
+					item: {
+						id: "ref-artifact",
 						kind: "artifact",
+						references: ["persisted-assistant-message"],
 						parts: [
 							expect.objectContaining({
 								kind: "artifactRef",
@@ -329,7 +352,7 @@ describe("createWorkerBeePeer", () => {
 			});
 
 			const artifactRef = (
-				server.messages[0] as {
+				server.messages[1] as {
 					payload: {
 						item: { parts: Array<{ kind: string; uri?: string; sizeBytes?: number; mimeType?: string }> };
 					};

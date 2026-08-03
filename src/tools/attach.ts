@@ -25,8 +25,30 @@ const attachSchema = Type.Object({
 });
 
 function mimeTypeForPath(path: string): string | undefined {
-	if (extname(path).toLowerCase() === ".csv") return "text/csv";
-	return undefined;
+	switch (extname(path).toLowerCase()) {
+		case ".csv":
+			return "text/csv";
+		case ".png":
+			return "image/png";
+		case ".jpg":
+		case ".jpeg":
+			return "image/jpeg";
+		case ".gif":
+			return "image/gif";
+		case ".webp":
+			return "image/webp";
+		case ".svg":
+			return "image/svg+xml";
+		case ".pdf":
+			return "application/pdf";
+		case ".json":
+			return "application/json";
+		case ".html":
+		case ".htm":
+			return "text/html";
+		default:
+			return undefined;
+	}
 }
 
 export function createAttachTool(uploadFn: ArtifactHandler): AgentTool<typeof attachSchema> {

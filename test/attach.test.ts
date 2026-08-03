@@ -9,22 +9,27 @@ async function tempDir(): Promise<string> {
 }
 
 describe("attach tool", () => {
-	it("marks attached CSV files as text/csv artifacts", async () => {
+	it.each([
+		["report.csv", "text/csv"],
+		["chart.png", "image/png"],
+		["photo.jpg", "image/jpeg"],
+		["document.pdf", "application/pdf"],
+	])("marks attached %s files with the correct MIME type", async (filename, mimeType) => {
 		const root = await tempDir();
-		const csvPath = join(root, "report.csv");
-		await writeFile(csvPath, "name,value\nfoo,1\n");
+		const filePath = join(root, filename);
+		await writeFile(filePath, "test data");
 
 		const artifactHandler = vi.fn().mockResolvedValue(undefined);
 		const tool = createAttachTool(artifactHandler);
 
-		await tool.execute("tool-call-1", { label: "CSV export", path: csvPath });
+		await tool.execute("tool-call-1", { label: "Artifact", path: filePath });
 
 		expect(artifactHandler).toHaveBeenCalledWith(
 			expect.objectContaining({
-				path: csvPath,
-				name: "report.csv",
-				title: "report.csv",
-				mimeType: "text/csv",
+				path: filePath,
+				name: filename,
+				title: filename,
+				mimeType,
 			}),
 		);
 	});

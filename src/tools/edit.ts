@@ -1,8 +1,8 @@
-import { resolve } from "node:path";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { Type } from "@sinclair/typebox";
 import * as Diff from "diff";
 import type { Executor } from "../sandbox.js";
+import { outputDirectoryGuard, resolveOutputPath, shellEscape } from "./output-path.js";
 
 function generateDiffString(oldContent: string, newContent: string, contextLines = 4): string {
 	const parts = Diff.diffLines(oldContent, newContent);
@@ -85,7 +85,7 @@ const editSchema = Type.Object({
 	newText: Type.String({ description: "New text to replace the old text with" }),
 });
 
-export function createEditTool(executor: Executor, writableRoot: string): AgentTool<typeof editSchema> {
+export function createEditTool(executor: Executor, outputRoot: string): AgentTool<typeof editSchema> {
 	return {
 		name: "edit",
 		label: "edit",
@@ -96,10 +96,10 @@ export function createEditTool(executor: Executor, writableRoot: string): AgentT
 			{ path, oldText, newText }: { label: string; path: string; oldText: string; newText: string },
 			signal?: AbortSignal,
 		) => {
-			const targetPath = assertWritablePath(path, writableRoot);
+			const targetPath = resolveOutputPath(path, outputRoot, "Edits");
 			const directory = targetPath.substring(0, targetPath.lastIndexOf("/"));
 			const readResult = await executor.exec(
-				`${writableDirectoryGuard(writableRoot, directory)} && test ! -L ${shellEscape(targetPath)} && cat ${shellEscape(targetPath)}`,
+				`${outputDirectoryGuard(outputRoot, directory, false)} && test ! -L ${shellEscape(targetPath)} && cat ${shellEscape(targetPath)}`,
 				{ signal },
 			);
 			if (readResult.code !== 0) {
@@ -123,7 +123,7 @@ export function createEditTool(executor: Executor, writableRoot: string): AgentT
 			}
 
 			const writeResult = await executor.exec(
-				`${writableDirectoryGuard(writableRoot, directory)} && test ! -L ${shellEscape(targetPath)} && printf '%s' ${shellEscape(newContent)} > ${shellEscape(targetPath)}`,
+				`${outputDirectoryGuard(outputRoot, directory, false)} && test ! -L ${shellEscape(targetPath)} && printf '%s' ${shellEscape(newContent)} > ${shellEscape(targetPath)}`,
 				{
 					signal,
 				},
@@ -143,23 +143,4 @@ export function createEditTool(executor: Executor, writableRoot: string): AgentT
 			};
 		},
 	};
-}
-
-function shellEscape(s: string): string {
-	return `'${s.replace(/'/g, "'\\''")}'`;
-}
-
-function writableDirectoryGuard(root: string, directory: string): string {
-	const escapedRoot = shellEscape(resolve(root));
-	const escapedDirectory = shellEscape(directory);
-	return `mkdir -p ${escapedRoot} && root_real=$(realpath ${escapedRoot}) && dir_real=$(realpath ${escapedDirectory}) && case "$dir_real" in "$root_real"|"$root_real"/*) ;; *) echo 'Output path escapes through a symlink' >&2; exit 73;; esac`;
-}
-
-function assertWritablePath(path: string, writableRoot: string): string {
-	const root = resolve(writableRoot);
-	const target = resolve(root, path);
-	if (target !== root && !target.startsWith(`${root}/`)) {
-		throw new Error(`Edits are limited to the session output directory: ${root}`);
-	}
-	return target;
 }

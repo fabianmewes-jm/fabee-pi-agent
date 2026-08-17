@@ -628,7 +628,7 @@ describe("company_briefing Markdown rendering", () => {
 });
 
 describe("company_briefing worker-tool registration", () => {
-	it("does not expose company_briefing by default", async () => {
+	it("exposes company_briefing by default", async () => {
 		const sessionDir = await tempDir();
 		const tools = await createWorkerTools({
 			executor: { exec: vi.fn(), getWorkspacePath: (path) => path },
@@ -640,10 +640,10 @@ describe("company_briefing worker-tool registration", () => {
 			sessionDir,
 		});
 
-		expect(tools.map((tool) => tool.name)).not.toContain("company_briefing");
+		expect(tools.map((tool) => tool.name)).toContain("company_briefing");
 	});
 
-	it("exposes company_briefing when the optional built-in env gate is enabled", async () => {
+	it("continues to expose company_briefing when the legacy env gate is enabled", async () => {
 		vi.stubEnv("BEE_PI_AGENT_ENABLE_COMPANY_BRIEFING", "true");
 		const sessionDir = await tempDir();
 		const tools = await createWorkerTools({

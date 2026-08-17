@@ -2,6 +2,7 @@ import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { Type } from "@sinclair/typebox";
 import * as Diff from "diff";
 import type { Executor } from "../sandbox.js";
+import { type OutputPathGuard, shellEscape } from "./output-path.js";
 
 function generateDiffString(oldContent: string, newContent: string, contextLines = 4): string {
 	const parts = Diff.diffLines(oldContent, newContent);
@@ -84,18 +85,23 @@ const editSchema = Type.Object({
 	newText: Type.String({ description: "New text to replace the old text with" }),
 });
 
-export function createEditTool(executor: Executor): AgentTool<typeof editSchema> {
+export function createEditTool(executor: Executor, outputPaths: OutputPathGuard): AgentTool<typeof editSchema> {
 	return {
 		name: "edit",
 		label: "edit",
-		description: "Edit a file by replacing exact text. The oldText must match exactly.",
+		description: "Edit a session output file by replacing exact text. The oldText must match exactly.",
 		parameters: editSchema,
 		execute: async (
 			_toolCallId: string,
 			{ path, oldText, newText }: { label: string; path: string; oldText: string; newText: string },
 			signal?: AbortSignal,
 		) => {
-			const readResult = await executor.exec(`cat ${shellEscape(path)}`, { signal });
+			const targetPath = outputPaths.resolve(path, "Edits");
+			const directory = targetPath.substring(0, targetPath.lastIndexOf("/"));
+			const readResult = await executor.exec(
+				`${outputPaths.directoryCommand(directory, false)} && test ! -L ${shellEscape(targetPath)} && cat ${shellEscape(targetPath)}`,
+				{ signal },
+			);
 			if (readResult.code !== 0) {
 				throw new Error(readResult.stderr || `File not found: ${path}`);
 			}
@@ -116,9 +122,12 @@ export function createEditTool(executor: Executor): AgentTool<typeof editSchema>
 				throw new Error(`No changes made to ${path}.`);
 			}
 
-			const writeResult = await executor.exec(`printf '%s' ${shellEscape(newContent)} > ${shellEscape(path)}`, {
-				signal,
-			});
+			const writeResult = await executor.exec(
+				`${outputPaths.directoryCommand(directory, false)} && test ! -L ${shellEscape(targetPath)} && printf '%s' ${shellEscape(newContent)} > ${shellEscape(targetPath)}`,
+				{
+					signal,
+				},
+			);
 			if (writeResult.code !== 0) {
 				throw new Error(writeResult.stderr || `Failed to write file: ${path}`);
 			}
@@ -134,8 +143,4 @@ export function createEditTool(executor: Executor): AgentTool<typeof editSchema>
 			};
 		},
 	};
-}
-
-function shellEscape(s: string): string {
-	return `'${s.replace(/'/g, "'\\''")}'`;
 }

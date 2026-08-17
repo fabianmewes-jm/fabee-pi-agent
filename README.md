@@ -83,7 +83,7 @@ Primary variables:
 - `BEE_PI_AGENT_RETRY_MAX_RETRIES` optional number of automatic retries for transient model errors; default `6`
 - `BEE_PI_AGENT_RETRY_BASE_DELAY_MS` optional initial retry delay in milliseconds; default `2000` (exponential backoff)
 - `BEE_PI_AGENT_TOOL_MODULES` optional comma-separated extra tool modules
-- `BEE_PI_AGENT_MARKET_INSIGHTS_BASE_URL` optional salary API endpoint; enables `market_insights` when set with its token
+- `BEE_PI_AGENT_MARKET_INSIGHTS_BASE_URL` optional POST Salary Market Insights API route; enables aggregated salary-statistics `market_insights` when set with its token
 - `BEE_PI_AGENT_MARKET_INSIGHTS_CONTRACT_URL` optional published entity-facets URL; defaults to `/internal/entity-facets` on the salary API origin
 - `BEE_PI_AGENT_MARKET_INSIGHTS_TOKEN` salary API bearer token; never expose this value in prompts, logs, or artifacts
 - `BEE_PI_AGENT_NOMINATIM_URL` optional Nominatim search endpoint override for location geocoding
@@ -101,6 +101,22 @@ based provider flow instead.
 
 For migration convenience, the older `PI_AGENT_WORKER_*` variables are still
 accepted as fallbacks.
+
+## Market Insights
+
+When configured, `market_insights` is a typed wrapper for the POST Salary Market
+Insights route. It returns aggregated salary distributions, not reverse or
+candidate matching and not individual job-offer lookup. At startup it loads the
+entity-facets contract; the tool description and input schema expose the current
+market IDs and projected filters. Boolean filters use `true`/`false`, string
+filters use `{ "eq": string }` or `{ "contains": string }`, and number filters
+use `{ "eq": number }`, `{ "gt": number }`, or `{ "lt": number }`.
+
+Each slice uses exactly one geography: radius (coordinates or one geocoded
+location), county, state, or country. The model-visible result includes the
+normalized market, geography, filters, timeframe/default assumptions, and
+`sampleSize`, `p25`, `median`, `p75`, and `mean`. `joboffer_id` is deliberately
+not a projected Market Insights filter because the route is aggregate-only.
 
 ## Built-in dbt tool
 

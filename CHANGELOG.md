@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.42
+
+- narrow `market_insights` to aggregated salary statistics from the POST Salary Market Insights route, with visible per-slice scope and percentile statistics
+- generate Market Insights market/filter schema guidance from the startup entity-facets contract and reject unsupported `joboffer_id` filtering
 ## 0.1.41
 
 - consolidate Fabee analytics, Market Insights, and Company Briefing capabilities behind typed tools

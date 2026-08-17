@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { Type } from "@sinclair/typebox";
 import * as Diff from "diff";
@@ -84,18 +85,23 @@ const editSchema = Type.Object({
 	newText: Type.String({ description: "New text to replace the old text with" }),
 });
 
-export function createEditTool(executor: Executor): AgentTool<typeof editSchema> {
+export function createEditTool(executor: Executor, writableRoot: string): AgentTool<typeof editSchema> {
 	return {
 		name: "edit",
 		label: "edit",
-		description: "Edit a file by replacing exact text. The oldText must match exactly.",
+		description: "Edit a session output file by replacing exact text. The oldText must match exactly.",
 		parameters: editSchema,
 		execute: async (
 			_toolCallId: string,
 			{ path, oldText, newText }: { label: string; path: string; oldText: string; newText: string },
 			signal?: AbortSignal,
 		) => {
-			const readResult = await executor.exec(`cat ${shellEscape(path)}`, { signal });
+			const targetPath = assertWritablePath(path, writableRoot);
+			const directory = targetPath.substring(0, targetPath.lastIndexOf("/"));
+			const readResult = await executor.exec(
+				`${writableDirectoryGuard(writableRoot, directory)} && test ! -L ${shellEscape(targetPath)} && cat ${shellEscape(targetPath)}`,
+				{ signal },
+			);
 			if (readResult.code !== 0) {
 				throw new Error(readResult.stderr || `File not found: ${path}`);
 			}
@@ -116,9 +122,12 @@ export function createEditTool(executor: Executor): AgentTool<typeof editSchema>
 				throw new Error(`No changes made to ${path}.`);
 			}
 
-			const writeResult = await executor.exec(`printf '%s' ${shellEscape(newContent)} > ${shellEscape(path)}`, {
-				signal,
-			});
+			const writeResult = await executor.exec(
+				`${writableDirectoryGuard(writableRoot, directory)} && test ! -L ${shellEscape(targetPath)} && printf '%s' ${shellEscape(newContent)} > ${shellEscape(targetPath)}`,
+				{
+					signal,
+				},
+			);
 			if (writeResult.code !== 0) {
 				throw new Error(writeResult.stderr || `Failed to write file: ${path}`);
 			}
@@ -138,4 +147,19 @@ export function createEditTool(executor: Executor): AgentTool<typeof editSchema>
 
 function shellEscape(s: string): string {
 	return `'${s.replace(/'/g, "'\\''")}'`;
+}
+
+function writableDirectoryGuard(root: string, directory: string): string {
+	const escapedRoot = shellEscape(resolve(root));
+	const escapedDirectory = shellEscape(directory);
+	return `mkdir -p ${escapedRoot} && root_real=$(realpath ${escapedRoot}) && dir_real=$(realpath ${escapedDirectory}) && case "$dir_real" in "$root_real"|"$root_real"/*) ;; *) echo 'Output path escapes through a symlink' >&2; exit 73;; esac`;
+}
+
+function assertWritablePath(path: string, writableRoot: string): string {
+	const root = resolve(writableRoot);
+	const target = resolve(root, path);
+	if (target !== root && !target.startsWith(`${root}/`)) {
+		throw new Error(`Edits are limited to the session output directory: ${root}`);
+	}
+	return target;
 }

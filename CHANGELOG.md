@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.41
+
+- consolidate Fabee analytics, Market Insights, and Company Briefing capabilities behind typed tools
+- load the entity-facets contract once at startup and constrain file writes to session outputs
+
 ## 0.1.40
 
 - preserve image MIME types for artifact previews

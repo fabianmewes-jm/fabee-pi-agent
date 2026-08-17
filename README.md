@@ -83,7 +83,10 @@ Primary variables:
 - `BEE_PI_AGENT_RETRY_MAX_RETRIES` optional number of automatic retries for transient model errors; default `6`
 - `BEE_PI_AGENT_RETRY_BASE_DELAY_MS` optional initial retry delay in milliseconds; default `2000` (exponential backoff)
 - `BEE_PI_AGENT_TOOL_MODULES` optional comma-separated extra tool modules
-- `BEE_PI_AGENT_ENABLE_COMPANY_BRIEFING` optional `true`/`1` env gate for the baked-in `company_briefing` worker tool
+- `BEE_PI_AGENT_MARKET_INSIGHTS_BASE_URL` optional salary API endpoint; enables `market_insights` when set with its token
+- `BEE_PI_AGENT_MARKET_INSIGHTS_CONTRACT_URL` optional published entity-facets URL; defaults to `/internal/entity-facets` on the salary API origin
+- `BEE_PI_AGENT_MARKET_INSIGHTS_TOKEN` salary API bearer token; never expose this value in prompts, logs, or artifacts
+- `BEE_PI_AGENT_NOMINATIM_URL` optional Nominatim search endpoint override for location geocoding
 - `BEE_PI_AGENT_COMPANY_BRIEFING_DBT_TARGET` optional dbt target for `company_briefing`, defaulting to `prod`
 - `BEE_PI_AGENT_COMPANY_BRIEFING_QUERY_TIMEOUT_SECONDS` optional BI query timeout for `company_briefing`, default `45`
 - `BEE_PI_AGENT_DBT_PROJECT_DIR` optional dbt project directory for the built-in `dbt` tool
@@ -123,17 +126,7 @@ If `BEE_PI_AGENT_DBT_COMMAND` is not set, the tool tries a local `.venv/bin/dbt`
 
 ## Built-in Company Briefing tool
 
-The image contains an optional `company_briefing` worker tool for JobMatch Company Briefings. It is not exposed by default. Enable it either with:
-
-```bash
-BEE_PI_AGENT_ENABLE_COMPANY_BRIEFING=true
-```
-
-or by loading the baked module explicitly:
-
-```bash
-BEE_PI_AGENT_TOOL_MODULES=./dist/tools/company-briefing.js
-```
+The image includes the `company_briefing` worker tool for JobMatch Company Briefings. It is available by default and may also be reused as an extension module.
 
 The tool contract is `companyId`. It queries already-built Analytics/dbt models with the prod target by default, and returns Slack-ready Markdown plus structured non-raw signal details. Company Briefings should use this tool and should not be reconstructed through arbitrary dbt/BI queries in the agent prompt path.
 

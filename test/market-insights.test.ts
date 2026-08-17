@@ -137,6 +137,17 @@ describe("truck dynamic radius (ContractComposedMatching.scala)", () => {
 });
 
 describe("market_insights tool", () => {
+	it("exposes salary-market semantics and contract-generated parameter unions", () => {
+		const tool = createMarketInsightsTool(runtime(vi.fn()));
+		expect(tool.description).toContain("POST salary Market Insights route");
+		expect(tool.description).toContain("not reverse matching or candidate matching");
+		expect(tool.description).toContain("Supported salary markets: truck, scheduler");
+		expect(tool.description).toContain("language (STRING)");
+		expect(tool.description).toContain("Use exactly one geo form");
+		expect(tool.parameters.properties.slices.items.properties.market.anyOf).toHaveLength(2);
+		expect(tool.parameters.properties.slices.items.properties.filters.properties.language.anyOf).toHaveLength(2);
+	});
+
 	it("supports typed filters, multiple markets, geo forms, defaults, and structured semantics", async () => {
 		const fetch = vi.fn().mockImplementation(async (_url, request) => {
 			const slices = JSON.parse(request.body).slices;
@@ -172,6 +183,19 @@ describe("market_insights tool", () => {
 			lastUpdatedDefinition: expect.stringContaining("not activity"),
 		});
 		expect(result.details.slices).toHaveLength(3);
+
+		const visible = result.content[0];
+		expect(visible.type).toBe("text");
+		if (visible.type !== "text") throw new Error("Expected text content.");
+		expect(visible.text).toContain('"market":"truck"');
+		expect(visible.text).toContain('"geo":{"type":"geo_radius","lat":51,"lon":7,"radius_km":90}');
+		expect(visible.text).toContain('"filters":{"license.ce":true');
+		expect(visible.text).toContain('"timeframe":"all available data"');
+		expect(visible.text).toContain('"sampleSize":12');
+		expect(visible.text).toContain('"p25":2800');
+		expect(visible.text).toContain('"median":3000');
+		expect(visible.text).toContain('"p75":3300');
+		expect(visible.text).toContain('"mean":3050');
 	});
 
 	it("defaults missing geography to Germany, timeframe to all data, filters to none", async () => {
@@ -235,6 +259,17 @@ describe("market_insights tool", () => {
 			).rejects.toThrow();
 			expect(fetch).not.toHaveBeenCalled();
 		}
+	});
+
+	it("explains that joboffer_id cannot scope aggregated salary Market Insights", async () => {
+		const fetch = vi.fn();
+		await expect(
+			createMarketInsightsTool(runtime(fetch)).execute("id", {
+				label: "job offer",
+				slices: [{ market: "truck", filters: { joboffer_id: { eq: "123" } } }],
+			}),
+		).rejects.toThrow("cannot query an individual job offer");
+		expect(fetch).not.toHaveBeenCalled();
 	});
 
 	it("uses bearer auth but never exposes the token in results or errors", async () => {

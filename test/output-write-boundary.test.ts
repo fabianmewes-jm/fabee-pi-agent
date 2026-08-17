@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createEditTool } from "../src/tools/edit.js";
+import { createOutputPathGuard } from "../src/tools/output-path.js";
 import { createWriteTool } from "../src/tools/write.js";
 
 const mockedExecutor = { exec: vi.fn(), getWorkspacePath: (path: string) => path };
@@ -35,15 +36,16 @@ async function realExecutor() {
 
 describe("output write boundary", () => {
 	it("rejects lexical writes and edits outside the session outputs directory", async () => {
+		const outputPaths = createOutputPathGuard("/session/outputs");
 		await expect(
-			createWriteTool(mockedExecutor, "/session/outputs").execute("call", {
+			createWriteTool(mockedExecutor, outputPaths).execute("call", {
 				label: "write",
 				path: "../secret.txt",
 				content: "no",
 			}),
 		).rejects.toThrow("session output directory");
 		await expect(
-			createEditTool(mockedExecutor, "/session/outputs").execute("call", {
+			createEditTool(mockedExecutor, outputPaths).execute("call", {
 				label: "edit",
 				path: "/workspace/file.txt",
 				oldText: "a",
@@ -56,13 +58,14 @@ describe("output write boundary", () => {
 	it("resolves relative writes inside the output root and permits editing them", async () => {
 		const { root, executor } = await realExecutor();
 		const outputs = join(root, "session", "outputs");
-		await createWriteTool(executor, outputs).execute("call", {
+		const outputPaths = createOutputPathGuard(outputs);
+		await createWriteTool(executor, outputPaths).execute("call", {
 			label: "write",
 			path: "reports/result.txt",
 			content: "before",
 		});
 		expect(await readFile(join(outputs, "reports/result.txt"), "utf8")).toBe("before");
-		await createEditTool(executor, outputs).execute("call", {
+		await createEditTool(executor, outputPaths).execute("call", {
 			label: "edit",
 			path: "reports/result.txt",
 			oldText: "before",
@@ -74,6 +77,7 @@ describe("output write boundary", () => {
 	it("rejects existing file and parent-directory symlinks that escape", async () => {
 		const { root, executor } = await realExecutor();
 		const outputs = join(root, "session", "outputs");
+		const outputPaths = createOutputPathGuard(outputs);
 		const outside = join(root, "outside");
 		await mkdir(outputs, { recursive: true });
 		await mkdir(outside);
@@ -81,10 +85,18 @@ describe("output write boundary", () => {
 		await symlink(outside, join(outputs, "escape"));
 		await symlink(join(outside, "secret.txt"), join(outputs, "file-link"));
 		await expect(
-			createWriteTool(executor, outputs).execute("call", { label: "write", path: "escape/new.txt", content: "bad" }),
+			createWriteTool(executor, outputPaths).execute("call", {
+				label: "write",
+				path: "escape/new.txt",
+				content: "bad",
+			}),
 		).rejects.toThrow();
 		await expect(
-			createWriteTool(executor, outputs).execute("call", { label: "write", path: "file-link", content: "bad" }),
+			createWriteTool(executor, outputPaths).execute("call", {
+				label: "write",
+				path: "file-link",
+				content: "bad",
+			}),
 		).rejects.toThrow();
 		expect(await readFile(join(outside, "secret.txt"), "utf8")).toBe("safe");
 	});

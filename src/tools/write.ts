@@ -1,7 +1,7 @@
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { Type } from "@sinclair/typebox";
 import type { Executor } from "../sandbox.js";
-import { outputDirectoryGuard, resolveOutputPath, shellEscape } from "./output-path.js";
+import { type OutputPathGuard, shellEscape } from "./output-path.js";
 
 const writeSchema = Type.Object({
 	label: Type.String({ description: "Brief description of what you're writing (shown to user)" }),
@@ -9,7 +9,7 @@ const writeSchema = Type.Object({
 	content: Type.String({ description: "Content to write to the file" }),
 });
 
-export function createWriteTool(executor: Executor, outputRoot: string): AgentTool<typeof writeSchema> {
+export function createWriteTool(executor: Executor, outputPaths: OutputPathGuard): AgentTool<typeof writeSchema> {
 	return {
 		name: "write",
 		label: "write",
@@ -20,9 +20,9 @@ export function createWriteTool(executor: Executor, outputRoot: string): AgentTo
 			{ path, content }: { label: string; path: string; content: string },
 			signal?: AbortSignal,
 		) => {
-			const targetPath = resolveOutputPath(path, outputRoot, "Writes");
+			const targetPath = outputPaths.resolve(path, "Writes");
 			const dir = targetPath.substring(0, targetPath.lastIndexOf("/"));
-			const cmd = `${outputDirectoryGuard(outputRoot, dir, true)} && test ! -L ${shellEscape(targetPath)} && printf '%s' ${shellEscape(content)} > ${shellEscape(targetPath)}`;
+			const cmd = `${outputPaths.directoryCommand(dir, true)} && test ! -L ${shellEscape(targetPath)} && printf '%s' ${shellEscape(content)} > ${shellEscape(targetPath)}`;
 			const result = await executor.exec(cmd, { signal });
 			if (result.code !== 0) {
 				throw new Error(result.stderr || `Failed to write file: ${path}`);

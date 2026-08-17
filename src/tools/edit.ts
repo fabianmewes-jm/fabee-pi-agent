@@ -2,7 +2,7 @@ import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { Type } from "@sinclair/typebox";
 import * as Diff from "diff";
 import type { Executor } from "../sandbox.js";
-import { outputDirectoryGuard, resolveOutputPath, shellEscape } from "./output-path.js";
+import { type OutputPathGuard, shellEscape } from "./output-path.js";
 
 function generateDiffString(oldContent: string, newContent: string, contextLines = 4): string {
 	const parts = Diff.diffLines(oldContent, newContent);
@@ -85,7 +85,7 @@ const editSchema = Type.Object({
 	newText: Type.String({ description: "New text to replace the old text with" }),
 });
 
-export function createEditTool(executor: Executor, outputRoot: string): AgentTool<typeof editSchema> {
+export function createEditTool(executor: Executor, outputPaths: OutputPathGuard): AgentTool<typeof editSchema> {
 	return {
 		name: "edit",
 		label: "edit",
@@ -96,10 +96,10 @@ export function createEditTool(executor: Executor, outputRoot: string): AgentToo
 			{ path, oldText, newText }: { label: string; path: string; oldText: string; newText: string },
 			signal?: AbortSignal,
 		) => {
-			const targetPath = resolveOutputPath(path, outputRoot, "Edits");
+			const targetPath = outputPaths.resolve(path, "Edits");
 			const directory = targetPath.substring(0, targetPath.lastIndexOf("/"));
 			const readResult = await executor.exec(
-				`${outputDirectoryGuard(outputRoot, directory, false)} && test ! -L ${shellEscape(targetPath)} && cat ${shellEscape(targetPath)}`,
+				`${outputPaths.directoryCommand(directory, false)} && test ! -L ${shellEscape(targetPath)} && cat ${shellEscape(targetPath)}`,
 				{ signal },
 			);
 			if (readResult.code !== 0) {
@@ -123,7 +123,7 @@ export function createEditTool(executor: Executor, outputRoot: string): AgentToo
 			}
 
 			const writeResult = await executor.exec(
-				`${outputDirectoryGuard(outputRoot, directory, false)} && test ! -L ${shellEscape(targetPath)} && printf '%s' ${shellEscape(newContent)} > ${shellEscape(targetPath)}`,
+				`${outputPaths.directoryCommand(directory, false)} && test ! -L ${shellEscape(targetPath)} && printf '%s' ${shellEscape(newContent)} > ${shellEscape(targetPath)}`,
 				{
 					signal,
 				},

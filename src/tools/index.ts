@@ -10,6 +10,7 @@ import { createDbtTool } from "./dbt.js";
 import { createEditTool } from "./edit.js";
 import { loadWorkerToolExtensions } from "./extensions.js";
 import { createMarketInsightsTool, isMarketInsightsConfigured } from "./market-insights.js";
+import { createOutputPathGuard } from "./output-path.js";
 import { createReadTool } from "./read.js";
 import { createWriteTool } from "./write.js";
 
@@ -24,11 +25,12 @@ export interface CreateWorkerToolsArgs {
 }
 
 export async function createWorkerTools(args: CreateWorkerToolsArgs): Promise<AgentTool<any>[]> {
+	const outputPaths = createOutputPathGuard(join(args.sessionDir, "outputs"));
 	const builtinTools: AgentTool<any>[] = [
 		createReadTool(args.executor),
 		createBashTool(args.executor),
-		createEditTool(args.executor, join(args.sessionDir, "outputs")),
-		createWriteTool(args.executor, join(args.sessionDir, "outputs")),
+		createEditTool(args.executor, outputPaths),
+		createWriteTool(args.executor, outputPaths),
 		createAttachTool(args.artifactHandler),
 		createDbtTool(args.executor, args.workspaceRoot, args.workingDir, args.sessionDir),
 		createChartTool(args.sessionDir),

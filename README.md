@@ -113,7 +113,9 @@ filters use `{ "eq": string }` or `{ "contains": string }`, and number filters
 use `{ "eq": number }`, `{ "gt": number }`, or `{ "lt": number }`.
 
 Each slice uses exactly one geography: radius (coordinates or one geocoded
-location), county, state, or country. The model-visible result includes the
+location), county, state, or country. `radiusKm` is sent only when the user
+explicitly states a radius; otherwise the wrapper resolves the entity-facets
+contract rule and uses 50 km only if no rule exists. The model-visible result includes the
 normalized market, geography, filters, timeframe/default assumptions, and
 `sampleSize`, `p25`, `median`, `p75`, and `mean`. `joboffer_id` is deliberately
 not a projected Market Insights filter because the route is aggregate-only.

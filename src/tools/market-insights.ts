@@ -29,7 +29,14 @@ interface Runtime {
 }
 let startupRuntime: Runtime | undefined;
 
-const radiusKm = Type.Optional(Type.Number({ exclusiveMinimum: 0, maximum: 500 }));
+const radiusKm = Type.Optional(
+	Type.Number({
+		exclusiveMinimum: 0,
+		maximum: 500,
+		description:
+			"Set only when the user explicitly states a radius. Otherwise omit radiusKm so the tool applies the entity-facets contract rule, then its 50 km fallback only when no contract rule exists.",
+	}),
+);
 const geoSchema = Type.Union([
 	Type.Object(
 		{
@@ -319,7 +326,7 @@ function describeContract(contract: MarketInsightsContract): string {
 		"Query aggregated salary statistics through the POST salary Market Insights route; this is not reverse matching or candidate matching.",
 		`Supported salary markets: ${contract.markets.join(", ")}.`,
 		`Supported projection filters: ${filters || "none"}. BOOLEAN uses true/false; STRING uses { eq: string } or { contains: string }; NUMBER uses { eq: number }, { gt: number }, or { lt: number }.`,
-		"Use exactly one geo form per slice: geo_radius (coordinates or one geocoded location, optionally radiusKm), geo_county, geo_state, or geo_country. Do not combine location with coordinates.",
+		"Use exactly one geo form per slice: geo_radius (coordinates or one geocoded location, optionally radiusKm), geo_county, geo_state, or geo_country. Do not combine location with coordinates. Set radiusKm only when the user explicitly states a radius; otherwise omit it so this tool applies the entity-facets contract rule and only then its 50 km fallback.",
 		"joboffer_id is not a supported projection filter because this tool does not query individual job offers.",
 	].join(" ");
 }

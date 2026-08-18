@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.43
+
+- require the model to omit `radiusKm` unless the user explicitly supplies it, preserving contract-derived radius defaults
+
 ## 0.1.42
 
 - narrow `market_insights` to aggregated salary statistics from the POST Salary Market Insights route, with visible per-slice scope and percentile statistics

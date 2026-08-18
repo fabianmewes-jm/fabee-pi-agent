@@ -144,6 +144,13 @@ describe("market_insights tool", () => {
 		expect(tool.description).toContain("Supported salary markets: truck, scheduler");
 		expect(tool.description).toContain("language (STRING)");
 		expect(tool.description).toContain("Use exactly one geo form");
+		expect(tool.description).toContain("Set radiusKm only when the user explicitly states a radius");
+		expect(tool.parameters.properties.slices.items.properties.geo.anyOf[0].properties.radiusKm.description).toContain(
+			"only when the user explicitly states a radius",
+		);
+		expect(tool.parameters.properties.slices.items.properties.geo.anyOf[0].properties.radiusKm.description).toContain(
+			"50 km fallback only when no contract rule exists",
+		);
 		expect(tool.parameters.properties.slices.items.properties.market.anyOf).toHaveLength(2);
 		expect(tool.parameters.properties.slices.items.properties.filters.properties.language.anyOf).toHaveLength(2);
 	});
@@ -223,6 +230,24 @@ describe("market_insights tool", () => {
 			slices: [{ market: "scheduler", geo: { type: "geo_radius", lat: 1, lon: 2, radiusKm: 25 } }],
 		});
 		expect(JSON.parse(fetch.mock.calls[0][1].body).slices[0].geo.radius_km).toBe(25);
+	});
+
+	it("resolves an omitted radius from the contract before the 50 km fallback", async () => {
+		const fetch = vi.fn().mockImplementation(async () => response({ results: [{ statistics: stats }] }));
+		await createMarketInsightsTool(runtime(fetch)).execute("contract-radius", {
+			label: "contract radius",
+			slices: [{ market: "scheduler", geo: { type: "geo_radius", lat: 1, lon: 2 } }],
+		});
+		const withoutRadiusRule = {
+			...parseContract(contract),
+			radiusRules: {},
+		};
+		await createMarketInsightsTool(runtime(fetch, { contract: withoutRadiusRule })).execute("fallback-radius", {
+			label: "fallback radius",
+			slices: [{ market: "scheduler", geo: { type: "geo_radius", lat: 1, lon: 2 } }],
+		});
+		expect(JSON.parse(fetch.mock.calls[0][1].body).slices[0].geo.radius_km).toBe(55);
+		expect(JSON.parse(fetch.mock.calls[1][1].body).slices[0].geo.radius_km).toBe(50);
 	});
 
 	it("prioritizes Germany and rejects ambiguous Nominatim results without calling salary API", async () => {

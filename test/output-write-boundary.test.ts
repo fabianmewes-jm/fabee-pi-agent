@@ -43,7 +43,7 @@ describe("output write boundary", () => {
 				path: "../secret.txt",
 				content: "no",
 			}),
-		).rejects.toThrow("session output directory");
+		).rejects.toThrow("configured output directories");
 		await expect(
 			createEditTool(mockedExecutor, outputPaths).execute("call", {
 				label: "edit",
@@ -51,7 +51,7 @@ describe("output write boundary", () => {
 				oldText: "a",
 				newText: "b",
 			}),
-		).rejects.toThrow("session output directory");
+		).rejects.toThrow("configured output directories");
 		expect(mockedExecutor.exec).not.toHaveBeenCalled();
 	});
 
@@ -72,6 +72,26 @@ describe("output write boundary", () => {
 			newText: "after",
 		});
 		expect(await readFile(join(outputs, "reports/result.txt"), "utf8")).toBe("after");
+	});
+
+	it("allows absolute writes inside an explicitly configured additional root", async () => {
+		const { root, executor } = await realExecutor();
+		const outputs = join(root, "session", "outputs");
+		const taskLogs = join(root, "project", "docs", "log", "tasks");
+		const outputPaths = createOutputPathGuard(outputs, [taskLogs]);
+		await createWriteTool(executor, outputPaths).execute("call", {
+			label: "write task log",
+			path: join(taskLogs, "2026-08-20_result.md"),
+			content: "documented",
+		});
+		expect(await readFile(join(taskLogs, "2026-08-20_result.md"), "utf8")).toBe("documented");
+		await expect(
+			createWriteTool(executor, outputPaths).execute("call", {
+				label: "write model",
+				path: join(root, "project", "models", "changed.sql"),
+				content: "not allowed",
+			}),
+		).rejects.toThrow("configured output directories");
 	});
 
 	it("rejects existing file and parent-directory symlinks that escape", async () => {

@@ -25,12 +25,15 @@ export interface CreateWorkerToolsArgs {
 }
 
 export async function createWorkerTools(args: CreateWorkerToolsArgs): Promise<AgentTool<any>[]> {
-	const outputPaths = createOutputPathGuard(join(args.sessionDir, "outputs"));
+	const outputRoot = join(args.sessionDir, "outputs");
+	const outputPaths = createOutputPathGuard(outputRoot);
+	const taskLogDir = process.env.BEE_PI_AGENT_TASK_LOG_DIR?.trim();
+	const writePaths = createOutputPathGuard(outputRoot, taskLogDir ? [taskLogDir] : []);
 	const builtinTools: AgentTool<any>[] = [
 		createReadTool(args.executor),
 		createBashTool(args.executor),
 		createEditTool(args.executor, outputPaths),
-		createWriteTool(args.executor, outputPaths),
+		createWriteTool(args.executor, writePaths),
 		createAttachTool(args.artifactHandler),
 		createDbtTool(args.executor, args.workspaceRoot, args.workingDir, args.sessionDir),
 		createChartTool(args.sessionDir),

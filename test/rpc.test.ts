@@ -257,6 +257,111 @@ describe("createWorkerBeePeer", () => {
 		}
 	});
 
+	it("emits transport-neutral action items for every correlated tool call", async () => {
+		runWorkerMock.mockImplementation(async (request: InternalWorkerRunRequest, _runtimeConfig, sink) => {
+			await sink({
+				type: "tool.started",
+				runId: request.runId,
+				toolCallId: "call-1",
+				toolName: "read",
+				title: "Datei lesen",
+				label: "Konfiguration prüfen",
+				args: { label: "Konfiguration prüfen", path: "/secret/path" },
+			});
+			await sink({
+				type: "tool.completed",
+				runId: request.runId,
+				toolCallId: "call-1",
+				toolName: "read",
+				title: "Datei lesen",
+				label: "Konfiguration prüfen",
+				success: true,
+				result: "raw result must not be transported",
+			});
+			await sink({
+				type: "tool.started",
+				runId: request.runId,
+				toolCallId: "call-2",
+				toolName: "read",
+				title: "Datei lesen",
+				label: "Fehlende Datei lesen",
+			});
+			await sink({
+				type: "tool.completed",
+				runId: request.runId,
+				toolCallId: "call-2",
+				toolName: "read",
+				title: "Datei lesen",
+				success: false,
+				result: "raw error must not be transported",
+			});
+		});
+
+		const server = await startBeeServer();
+		try {
+			server.input.write(
+				frame({
+					id: "msg-actions",
+					type: "command",
+					name: "turn.start",
+					time: new Date().toISOString(),
+					sessionId: "session-actions",
+					turnId: "turn-actions",
+					from: { kind: "human", id: "U123" },
+					to: { kind: "agent", id: "agent:bee-pi-agent" },
+					replyTo: null,
+					payload: {
+						input: [{ kind: "text", text: "Read two files." }],
+						hints: { transport: "slack" },
+					},
+				}),
+			);
+
+			await vi.waitFor(() => expect(server.messages).toHaveLength(4));
+			expect(server.messages.map(({ name }) => name)).toEqual([
+				"item.appended",
+				"item.updated",
+				"item.appended",
+				"item.updated",
+			]);
+			expect(server.messages[0]).toMatchObject({
+				payload: {
+					eventType: "item.appended",
+					item: {
+						id: "call-1",
+						kind: "action",
+						role: "tool",
+						parts: [
+							{ kind: "text", text: "Datei lesen" },
+							{ kind: "text", text: "Konfiguration prüfen" },
+							{ kind: "status", status: "in_progress" },
+						],
+					},
+				},
+			});
+			expect(server.messages[1]).toMatchObject({
+				payload: {
+					eventType: "item.updated",
+					itemId: "call-1",
+					appendParts: [{ kind: "status", status: "complete" }],
+				},
+			});
+			expect(server.messages[2]).toMatchObject({
+				payload: {
+					item: { id: "call-2", parts: expect.arrayContaining([{ kind: "status", status: "in_progress" }]) },
+				},
+			});
+			expect(server.messages[3]).toMatchObject({
+				payload: { itemId: "call-2", appendParts: [{ kind: "status", status: "error" }] },
+			});
+			expect(JSON.stringify(server.messages)).not.toContain("raw result");
+			expect(JSON.stringify(server.messages)).not.toContain("raw error");
+			expect(JSON.stringify(server.messages)).not.toContain("/secret/path");
+		} finally {
+			await server.close();
+		}
+	});
+
 	it("embeds PNG artifacts as data URI artifact refs via blob store plumbing", async () => {
 		runWorkerMock.mockImplementation(
 			async (request: InternalWorkerRunRequest, runtimeConfig: WorkerRuntimeConfig, sink) => {

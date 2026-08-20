@@ -113,14 +113,18 @@ export type WorkerRunEvent =
 	| {
 			type: "tool.started";
 			runId: string;
+			toolCallId: string;
 			toolName: string;
+			title: string;
 			label?: string;
 			args?: Record<string, unknown>;
 	  }
 	| {
 			type: "tool.completed";
 			runId: string;
+			toolCallId: string;
 			toolName: string;
+			title: string;
 			success: boolean;
 			durationMs?: number;
 			result?: string;

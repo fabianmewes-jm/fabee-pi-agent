@@ -3,6 +3,7 @@ import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
 import { Type } from "@sinclair/typebox";
 import { extname } from "path";
 import type { Executor } from "../sandbox.js";
+import { BUILTIN_TOOL_TITLES } from "./titles.js";
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, type TruncationResult, truncateHead } from "./truncate.js";
 
 const IMAGE_MIME_TYPES: Record<string, string> = {
@@ -32,7 +33,7 @@ interface ReadToolDetails {
 export function createReadTool(executor: Executor): AgentTool<typeof readSchema> {
 	return {
 		name: "read",
-		label: "read",
+		label: BUILTIN_TOOL_TITLES.read,
 		description: `Read text or image files. Text output is truncated to ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB.`,
 		parameters: readSchema,
 		execute: async (

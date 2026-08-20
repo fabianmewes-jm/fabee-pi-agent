@@ -2,6 +2,7 @@ import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { Type } from "@sinclair/typebox";
 import type { Executor } from "../sandbox.js";
 import { type OutputPathGuard, shellEscape } from "./output-path.js";
+import { BUILTIN_TOOL_TITLES } from "./titles.js";
 
 const writeSchema = Type.Object({
 	label: Type.String({ description: "Brief description of what you're writing (shown to user)" }),
@@ -12,7 +13,7 @@ const writeSchema = Type.Object({
 export function createWriteTool(executor: Executor, outputPaths: OutputPathGuard): AgentTool<typeof writeSchema> {
 	return {
 		name: "write",
-		label: "write",
+		label: BUILTIN_TOOL_TITLES.write,
 		description: "Write content to a session output file. Creates parent directories and overwrites existing files.",
 		parameters: writeSchema,
 		execute: async (

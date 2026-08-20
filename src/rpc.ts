@@ -406,26 +406,20 @@ function mapEventToBeeEnvelopes(
 			return [envelope];
 		}
 		case "tool.started":
-			return activeRun.transport === "web"
-				? [
-						createItemEventEnvelope(activeRun, requester, "item.appended", {
-							eventType: "item.appended",
-							item: createStatusItem(`Tool gestartet: ${event.label || event.toolName}`),
-						}),
-					]
-				: [];
+			return [
+				createItemEventEnvelope(activeRun, requester, "item.appended", {
+					eventType: "item.appended",
+					item: createActionItem(event.toolCallId, event.title, event.label),
+				}),
+			];
 		case "tool.completed":
-			return activeRun.transport === "web"
-				? [
-						createItemEventEnvelope(activeRun, requester, "item.appended", {
-							eventType: "item.appended",
-							item: createStatusItem(
-								`Tool beendet: ${event.label || event.toolName}`,
-								event.success ? "info" : "warning",
-							),
-						}),
-					]
-				: [];
+			return [
+				createItemEventEnvelope(activeRun, requester, "item.updated", {
+					eventType: "item.updated",
+					itemId: event.toolCallId,
+					appendParts: [{ kind: "status", status: event.success ? "complete" : "error" }],
+				}),
+			];
 		default:
 			return [];
 	}
@@ -494,12 +488,16 @@ function createTextItem(itemId: string, kind: "message" | "thinking", text: stri
 	};
 }
 
-function createStatusItem(status: string, level: "info" | "warning" | "error" = "info"): Item {
+function createActionItem(toolCallId: string, title: string, details?: string): Item {
 	return {
-		id: `item_${randomUUID()}`,
-		kind: "status",
-		role: "assistant",
-		parts: [{ kind: "status", status, level }],
+		id: toolCallId,
+		kind: "action",
+		role: "tool",
+		parts: [
+			{ kind: "text", text: title },
+			...(details ? [{ kind: "text" as const, text: details }] : []),
+			{ kind: "status", status: "in_progress" },
+		],
 	};
 }
 

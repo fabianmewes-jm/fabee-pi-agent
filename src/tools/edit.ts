@@ -3,6 +3,7 @@ import { Type } from "@sinclair/typebox";
 import * as Diff from "diff";
 import type { Executor } from "../sandbox.js";
 import { type OutputPathGuard, shellEscape } from "./output-path.js";
+import { BUILTIN_TOOL_TITLES } from "./titles.js";
 
 function generateDiffString(oldContent: string, newContent: string, contextLines = 4): string {
 	const parts = Diff.diffLines(oldContent, newContent);
@@ -88,7 +89,7 @@ const editSchema = Type.Object({
 export function createEditTool(executor: Executor, outputPaths: OutputPathGuard): AgentTool<typeof editSchema> {
 	return {
 		name: "edit",
-		label: "edit",
+		label: BUILTIN_TOOL_TITLES.edit,
 		description: "Edit a session output file by replacing exact text. The oldText must match exactly.",
 		parameters: editSchema,
 		execute: async (

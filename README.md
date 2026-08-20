@@ -50,6 +50,16 @@ expected local flow is:
 - agent streams event envelopes back on the same socket
 - sidecar may send `turn.cancel`
 
+### Tool lifecycle events
+
+Each Pi tool execution becomes a transport-neutral Bee Dance action lifecycle
+for every transport. The Pi `toolCallId` is preserved as the action item ID.
+`item.appended` contains the built-in or extension tool's static user-facing
+title, the optional dynamic `args.label`, and `in_progress`; the matching
+`item.updated` appends only `complete` or `error`. Tool results, arguments, and
+raw errors are never included in these action envelopes. Extension titles fall
+back from `tool.label` to `tool.name`.
+
 The default socket path is `/var/run/bee/worker.sock`.
 
 ## Run locally

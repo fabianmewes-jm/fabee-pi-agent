@@ -16,6 +16,7 @@ import { createWorkerBlobStore } from "./blob-store.js";
 import { createWorkerSettingsManager, syncLogToSessionManager } from "./context.js";
 import * as log from "./log.js";
 import { createExecutor, parseSandboxArg, type SandboxConfig, validateSandbox } from "./sandbox.js";
+import { createToolLifecycleTracker } from "./tool-lifecycle.js";
 import { createWorkerTools } from "./tools/index.js";
 import type {
 	InternalWorkerRunRequest,
@@ -250,28 +251,6 @@ function assertUniqueToolNames(tools: AgentTool<any>[]): void {
 		}
 		seen.add(tool.name);
 	}
-}
-
-function extractToolResultText(result: unknown): string {
-	if (typeof result === "string") return result;
-
-	if (
-		result &&
-		typeof result === "object" &&
-		"content" in result &&
-		Array.isArray((result as { content: unknown }).content)
-	) {
-		const content = (result as { content: Array<{ type: string; text?: string }> }).content;
-		const textParts: string[] = [];
-		for (const part of content) {
-			if (part.type === "text" && part.text) {
-				textParts.push(part.text);
-			}
-		}
-		if (textParts.length > 0) return textParts.join("\n");
-	}
-
-	return JSON.stringify(result);
 }
 
 function formatUserMessage(request: WorkerRunRequest, nonImagePaths: string[]): string {
@@ -618,7 +597,7 @@ export async function runWorker(
 		baseToolsOverride,
 	});
 
-	const pendingTools = new Map<string, { toolName: string; args: Record<string, unknown>; startTime: number }>();
+	const toolLifecycle = createToolLifecycleTracker(tools);
 	const syncedCount = syncLogToSessionManager(sessionManager, sessionDir);
 	if (syncedCount > 0) {
 		agent.state.messages = sessionManager.buildSessionContext().messages;
@@ -630,41 +609,13 @@ export async function runWorker(
 	session.subscribe(async (event) => {
 		if (event.type === "tool_execution_start") {
 			const agentEvent = event as AgentEvent & { type: "tool_execution_start" };
-			const args = agentEvent.args as Record<string, unknown> & { label?: string };
-			const label = args.label || agentEvent.toolName;
-
-			pendingTools.set(agentEvent.toolCallId, {
-				toolName: agentEvent.toolName,
-				args,
-				startTime: Date.now(),
-			});
-
-			await emit(eventSink, {
-				type: "tool.started",
-				runId: request.runId,
-				toolName: agentEvent.toolName,
-				label,
-				args,
-			});
+			await emit(eventSink, toolLifecycle.start(request.runId, agentEvent));
 			return;
 		}
 
 		if (event.type === "tool_execution_end") {
 			const agentEvent = event as AgentEvent & { type: "tool_execution_end" };
-			const pending = pendingTools.get(agentEvent.toolCallId);
-			pendingTools.delete(agentEvent.toolCallId);
-			const durationMs = pending ? Date.now() - pending.startTime : 0;
-
-			await emit(eventSink, {
-				type: "tool.completed",
-				runId: request.runId,
-				toolName: agentEvent.toolName,
-				success: !agentEvent.isError,
-				durationMs,
-				result: extractToolResultText(agentEvent.result),
-				label: pending?.args.label as string | undefined,
-				args: pending?.args,
-			});
+			await emit(eventSink, toolLifecycle.complete(request.runId, agentEvent));
 			return;
 		}
 

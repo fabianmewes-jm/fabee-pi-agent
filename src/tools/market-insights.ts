@@ -2,6 +2,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { Type } from "@sinclair/typebox";
+import { BUILTIN_TOOL_TITLES } from "./titles.js";
 
 export const MARKET_INSIGHTS_TOOL_NAME = "market_insights";
 export const DEFAULT_RADIUS_KM = 50;
@@ -467,7 +468,7 @@ export function createMarketInsightsTool(override?: Runtime): AgentTool<any> {
 	if (!runtime) throw new Error("Market Insights startup contract has not been initialized.");
 	return {
 		name: MARKET_INSIGHTS_TOOL_NAME,
-		label: MARKET_INSIGHTS_TOOL_NAME,
+		label: BUILTIN_TOOL_TITLES.market_insights,
 		description: describeContract(runtime.contract),
 		parameters: createSchema(runtime.contract),
 		execute: async (_id, input, signal) => {

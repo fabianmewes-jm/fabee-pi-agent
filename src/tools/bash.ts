@@ -5,6 +5,7 @@ import { join } from "node:path";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { Type } from "@sinclair/typebox";
 import type { Executor } from "../sandbox.js";
+import { BUILTIN_TOOL_TITLES } from "./titles.js";
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, type TruncationResult, truncateTail } from "./truncate.js";
 
 function getTempFilePath(): string {
@@ -26,7 +27,7 @@ interface BashToolDetails {
 export function createBashTool(executor: Executor): AgentTool<typeof bashSchema> {
 	return {
 		name: "bash",
-		label: "bash",
+		label: BUILTIN_TOOL_TITLES.bash,
 		description: `Execute a bash command in the current working directory. Output is truncated to the last ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB.`,
 		parameters: bashSchema,
 		execute: async (

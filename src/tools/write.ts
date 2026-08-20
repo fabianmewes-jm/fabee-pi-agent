@@ -14,7 +14,8 @@ export function createWriteTool(executor: Executor, outputPaths: OutputPathGuard
 	return {
 		name: "write",
 		label: BUILTIN_TOOL_TITLES.write,
-		description: "Write content to a session output file. Creates parent directories and overwrites existing files.",
+		description:
+			"Write content to an allowed session output or configured task-log file. Creates parent directories and overwrites existing files.",
 		parameters: writeSchema,
 		execute: async (
 			_toolCallId: string,

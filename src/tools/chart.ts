@@ -6,6 +6,7 @@ import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { createCanvas, GlobalFonts, Image } from "@napi-rs/canvas";
 import { Type } from "@sinclair/typebox";
 import { Chart, type ChartConfiguration, type Plugin, registerables } from "chart.js";
+import { BUILTIN_TOOL_TITLES } from "./titles.js";
 
 Chart.register(...registerables);
 
@@ -683,7 +684,7 @@ async function readRowsFromJsonPath(inputPath: string): Promise<Row[]> {
 export function createChartTool(sessionDir: string): AgentTool<typeof chartSchema> {
 	return {
 		name: "chart",
-		label: "chart",
+		label: BUILTIN_TOOL_TITLES.chart,
 		description:
 			"Render a deterministic PNG chart from a clean JSON file (normally dbt show { show: [...] }) and write it to disk. Does not send/register attachments; use the attach tool explicitly if the PNG should be sent. Does not guess columns; provide chartSpec or pieSpec explicitly.",
 		parameters: chartSchema,

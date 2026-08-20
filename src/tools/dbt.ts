@@ -6,6 +6,7 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { Type } from "@sinclair/typebox";
 import type { Executor } from "../sandbox.js";
+import { BUILTIN_TOOL_TITLES } from "./titles.js";
 import { DEFAULT_MAX_BYTES, formatSize, type TruncationResult, truncateHead, truncateTail } from "./truncate.js";
 
 const DBT_ACTIONS = ["list", "show", "compile", "test", "parse"] as const;
@@ -442,7 +443,7 @@ export function createDbtTool(
 ): AgentTool<typeof dbtSchema> {
 	return {
 		name: "dbt",
-		label: "dbt",
+		label: BUILTIN_TOOL_TITLES.dbt,
 		description:
 			"Run dbt commands for model discovery, compilation, tests, and inline SQL preview. Supports list/show/compile/test/parse. Does not support dbt build or dbt run; analytics queries should use already-built prod models. Configure BEE_PI_AGENT_DBT_PROJECT_DIR and optionally BEE_PI_AGENT_DBT_COMMAND / BEE_PI_AGENT_DBT_PROFILES_DIR.",
 		parameters: dbtSchema,

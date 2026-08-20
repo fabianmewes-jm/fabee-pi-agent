@@ -1,6 +1,7 @@
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { Type } from "@sinclair/typebox";
 import { basename, extname, resolve as resolvePath } from "path";
+import { BUILTIN_TOOL_TITLES } from "./titles.js";
 
 export type ArtifactInput =
 	| {
@@ -54,7 +55,7 @@ function mimeTypeForPath(path: string): string | undefined {
 export function createAttachTool(uploadFn: ArtifactHandler): AgentTool<typeof attachSchema> {
 	return {
 		name: "attach",
-		label: "attach",
+		label: BUILTIN_TOOL_TITLES.attach,
 		description:
 			"Send/expose a file path as a worker artifact event for the gateway or orchestrator. This is the only built-in tool that sends attachments.",
 		parameters: attachSchema,

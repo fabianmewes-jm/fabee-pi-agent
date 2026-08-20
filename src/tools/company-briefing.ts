@@ -6,6 +6,7 @@ import type { Executor } from "../sandbox.js";
 import type { ArtifactHandler } from "./attach.js";
 import { createDbtTool } from "./dbt.js";
 import type { WorkerToolExtensionContext } from "./extensions.js";
+import { BUILTIN_TOOL_TITLES } from "./titles.js";
 
 export const COMPANY_BRIEFING_TOOL_NAME = "company_briefing";
 export const JOBOFFER_ACTIVITY_OVERVIEW_TYPE = "JOBOFFER_ACTIVITY_OVERVIEW";
@@ -1675,7 +1676,7 @@ export function createCompanyBriefingTool(
 	const services = createDefaultServices(args);
 	return {
 		name: COMPANY_BRIEFING_TOOL_NAME,
-		label: "company_briefing",
+		label: BUILTIN_TOOL_TITLES.company_briefing,
 		description:
 			"Erstellt ein JobMatch-Unternehmensbriefing aus einer Unternehmens-ID. Für Unternehmensbriefings dieses Werkzeug nutzen und sie nicht mit eigenen dbt-/BI-Abfragen nachbauen. Gibt deutschsprachiges Markdown und strukturierte Details ohne Rohdaten zurück.",
 		parameters: companyBriefingSchema,
